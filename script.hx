@@ -16,6 +16,9 @@ var human:Player;
 DEBUG = {
 	SKIP_STUDYING: false,
 	MESSAGES: true,
+	BAD:false, // setup debug for bad ending
+	NEU:false, // setup debug for neutral ending
+	GOO:false, // setup debug for good ending
 }
 
 var START_ZONE_ID: Int = 65;
@@ -26,6 +29,50 @@ var PORT_LAUNCH_ZONE_ID: Int = 20;
 var LORE_CIRCLE_ZONE_IDS = [41, 45];
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
+
+/**
+ * These zones will not be captured by the spirits, but they can attack them
+ * 66 - Farm west of start
+ * 60 - Forest, east of start
+ * 53 - Kobold home tile
+ *
+ * All other zones are capturable by the spirits, and once captured, lost forever.
+ */
+var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53];
+
+/**
+ * These zones are where the spirits will launch their attacks. Once captured,
+ * they will start trying to claim neighbors, so this list will grow over time.
+ *
+ * 30 - North-east, iron/runestone
+ * 63 - Ruins, north west
+ * 80 - Ruins south of start
+ * 84 - farm south-west of start
+ * 85 - Southern most tile
+ * 87 - Geyser, east
+ * 90 - Wolf den, east
+
+ */
+var INVASION_ZONES = [30, 63, 80, 84, 85, 87, 90];
+
+/**
+ * These zones will be added after year 3, as they are harder to get to or important.
+ *
+ * 25 - Stone deposit
+ * 37 - Northern forest, leading to port
+ * 38 - Thor's Wrath
+ * 41 - Northern circle of stones
+ * 45 - Southern circle of stones
+ * 50 - empty plain, leading to port
+ * 72 - Graveyard
+ * 74 - Jotunn camp
+ */
+var INVASION_SECOND_STARTING_WAVE_ZONES = [25, 37, 38, 41, 45, 50, 72, 74];
+
+/**
+ * These zones have been taken by the spirits and are lost.
+ */
+var LOST_ZONES = [];
 
 var PRIMARY_OBJ_ID = "primaryobjid";
 var NONE_FORMAT = "NONE";
@@ -54,7 +101,47 @@ var SHIP_DATA = {
 };
 
 var SPIRIT_DATA = {
+	spiritMin:2, // Minimum number of spirits to send in a single attack
+	spiritMax:4, // Maximum number of spirits to send in a single attack
+	spiritMinGrowth:0.75, // How quickly the minimal attack size grows each year
+	spiritMaxGrowth:1.25, // How quickly the maximum attack size grows each year
 
+	/**
+	 * Maximum number of attacks that can occur at once.
+	 *
+	 * For example: In year one if the first attack wave is still around when a second wave would be sent, the second wave would instead be cancelled.
+	 */
+	maxSimultaneousAttacks:1.5,
+	maxSimultaneousAttacksGrowth:0.5, // growth each year. Note: when deciding to send an attack, the decimal is dropped. Thus, in Y3 at 2.5, only 2 attacks can happen
+
+	timeofLastAttackSent: 660.0, // when was the last attack, used to decide when to send the next one. Starting value is one month before Y2.
+
+	/**
+	 * We don't want to send too many attacks back-to-back, so a heavy penalty is applied to the chance of
+	 * another attack happening soon if the previous attack was also soon.
+	 * Likewise, if the previous attack had a long delta, a slight bonus is applied to maybe have a back-to-back attack.
+	 *
+	 * -1 is treated as a special value that applies no modifier.
+	 */
+	deltaOnPreviousAttack:-1,
+	deltaOnPreviousAttackThresholdSeconds:50, // 50 seconds will be the mid-point of the S-curve for how much the penalty will apply. Further from it magnifies result.
+
+	warningBetweenAttacksSeconds:180.0, // How much warning to give to the player of when the next attack will happen
+	warningBetweenAttacksSecondsGrowth:-25.0, // How much warning time is lost each year
+	warningBetweenAttacksMinimum:80.0, // Players are guaranteed 80 seconds of warning, meaning past Y4 the warnings are all the same.
+
+	timeToCaptureSeconds:80, // How long a spirit must sit on a tile undisturbed before it takes the tile. Reset if a unit enters to challenge the spirit
+
+	timeToFirstAttackSeconds:60 * 12, // 60 seconds per month, so not until Y2 starts.
+
+	timeToSecondWaveInvasionZones:60 * 12 * 3, // After 3 years we add in the second invasion waves candidate zones.
+
+	// The current ongoing attacks
+	attackData:[
+
+		// We need something here so Haxe knows what the type is.
+		{zone:getZone(START_ZONE_ID), captureProgress:0.0, spiritCount:0, attackTime:0.0, objId:null, attackedYet:true},
+	],
 };
 
 var KOBOLD_DATA = {
@@ -75,8 +162,6 @@ var GIANT_DATA = {
 
 	befriendReward:3, // free feasts
 };
-
-
 
 var DIALOG = {
 	opening:[
@@ -165,7 +250,7 @@ var DIALOG = {
 	],
 };
 
-BAD_ENDING_DATA = {
+var BAD_ENDING_DATA = {
 	villagersSacrificed:0,
 	sacrificesRequred:12,
 	objectiveId: "AppeaseTheIsland",
@@ -186,16 +271,16 @@ BAD_ENDING_DATA = {
 
 	finished:false, // This will be set to true if the player wins or loses, so as to trigger a delay after the dialog before end game screen
 	successfullyFinished: false, // Will only be set True if the player escapes the island with their WC
-	timeFinished:100000.0,
+	timeFinished:100000.0, // When the player finished. Once set, the game will end sometime after this time value.
 
 };
 
-neutralEnding = {
+var neutralEnding = {
 	resources: [{res:Resource.Wood, amt:900, objId:"Wood Needed"}, {res:Resource.Food, amt:500, objId:"Food Needed"},
 			{res:Resource.Iron, amt:15, objId:"Iron Needed"}, {res:Resource.Money, amt:400, objId:"Krowns Needed"}],
 };
 
-goodEnding = {
+var goodEnding = {
 	// TODO: requires the most work.
 };
 
@@ -262,7 +347,7 @@ function onFirstLaunch() {
 
 	// I would use me(), but the Editor thinks it is broken even though it works,
 	// but then it won't show any other errors :(
-	debug("getting human");
+	msg("getting human");
 	human = getZone(START_ZONE_ID).owner;
 	var hall = human.getTownHall();
 	summonWarchief(human, getZone(START_ZONE_ID), hall.x + 7, hall.y + 7);
@@ -270,25 +355,30 @@ function onFirstLaunch() {
 	human.addResource(Resource.Wood, 1000);
 	human.addResource(Resource.Money, 1000);
 
-	debug("setting up obj");
+	msg("setting up obj");
 	setupObjectives();
+	// human.coverZone(getZone(MYSTERY_ZONE_ID));
 
 	// ---- TESTING FOR BAD ENDING
-	var z = getZone(PORT_ZONE_ID);
-	human.discoverZone(z); // TODO FOR TESTING
-	human.discoverZone(getZone(MYSTERY_ZONE_ID));
-	human.discoverZone(getZone(57));
-	human.discoverZone(getZone(50));
-	human.takeControl(getZone(MYSTERY_ZONE_ID));
-	human.coverZone(getZone(MYSTERY_ZONE_ID));
-	killAllUnits([z, getZone(57), getZone(50)]);
-	human.takeControl(z);
-	getZone(PORT_ZONE_ID).addUnit(Unit.Villager, 14, human);
-	BAD_ENDING_DATA.currentlySacrificing = true;
-	human.addResource(Resource.Food, 500);
-	human.addResource(Resource.Stone, 5);
+	if(DEBUG.BAD) {
+		var z = getZone(PORT_ZONE_ID);
+		human.discoverZone(z); // TODO FOR TESTING
+		human.discoverZone(getZone(MYSTERY_ZONE_ID));
+		human.discoverZone(getZone(57));
+		human.discoverZone(getZone(50));
+		killAllUnits([z, getZone(57), getZone(50)]);
+		human.takeControl(z);
+		getZone(PORT_ZONE_ID).addUnit(Unit.Villager, 14, human);
+		BAD_ENDING_DATA.currentlySacrificing = true;
+		human.addResource(Resource.Food, 500);
+		human.addResource(Resource.Stone, 5);
+	}
 
 	// ---- END TESTING FOR BAD ENDING
+
+
+	// Clean up type data placeholders
+	SPIRIT_DATA.attackData.pop();
 }
 
 /**
@@ -311,7 +401,7 @@ function regularUpdate(dt : Float) {
 	checkEndGame();
 
 	if(toInt(state.time) % 10 == 0)
-		debug("running...");
+		msg("running...");
 }
 
 /**
@@ -326,7 +416,7 @@ function checkEndGame() {
 					human.customVictory("You have escaped Drage Ander!", "placeholder");
 				}
 				else{
-					customDefeat("You have failed to escape Drage Ander, and your soul is trapped forever beneath the island");
+					customDefeat("You have failed to escape Drage Ander Island, and your soul is trapped forever beneath the island!");
 				}
 			}
 	}
@@ -350,7 +440,7 @@ function checkObjectives() {
 	}
 
 	if(stoneCircleStudying.studied && !islandStudying.setupFinished) {
-		debug("Setting up ship data for mystery island.");
+		msg("Setting up ship data for mystery island.");
 		islandStudying.setupFinished = true;
 		state.objectives.setVisible(SHIP_DATA.objId, true);
 	}
@@ -412,7 +502,7 @@ function manageBadEndingObjectives() {
 			for(u in killEm){
 				u.die(false, true);
 			}
-			debug("Finished killing");
+			msg("Finished killing");
 		}
 
 		if(BAD_ENDING_DATA.villagersSacrificed >= BAD_ENDING_DATA.sacrificesRequred) {
@@ -476,20 +566,20 @@ function manageBadEndingObjectives() {
  */
 function checkDialog() {
 	if(DIALOG.opening.length > 0 && TIME_TO_OPENING_DIALOG < state.time) {
-		debug("Opening dialog shown");
+		msg("Opening dialog shown");
 		pauseAndShowDialog(DIALOG.opening);
 		DIALOG.opening = [];
 	}
 
-	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 2) {
-		debug("Initial explore dialog shown");
+	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 3) {
+		msg("Initial explore dialog shown");
 		pauseAndShowDialog(DIALOG.initial_explore);
 		state.objectives.setVisible(PRIMARY_OBJ_ID, true);
 		DIALOG.initial_explore = [];
 	}
 
-	if(DIALOG.spirit_appears.length > 0 && human.discovered.length == 4) {
-		debug("Spirit Appears dialog shown");
+	if(DIALOG.spirit_appears.length > 0 && human.discovered.length == 5) {
+		msg("Spirit Appears dialog shown");
 		pauseAndShowDialog(DIALOG.spirit_appears);
 		DIALOG.spirit_appears = [];
 	}
@@ -544,21 +634,23 @@ function setupGoodEnding() {
  */
 function checkStudyingProgress(tracker) {
 
-	if(tracker == starterStone && state.time > 30) {
-		tracker.studied = true;
-	}
-	else if(tracker == graveYardStudying && state.time > 40) {
-		tracker.studied = true;
-	}
-	else if(tracker == stoneCircleStudying && state.time > 50) {
-		tracker.studied = true;
-	} else if(tracker == islandStudying && state.time > 60) {
-		tracker.studied = true;
+	if(DEBUG.SKIP_STUDYING) {
+		if(tracker == starterStone && state.time > 30) {
+			tracker.studied = true;
+		}
+		else if(tracker == graveYardStudying && state.time > 40) {
+			tracker.studied = true;
+		}
+		else if(tracker == stoneCircleStudying && state.time > 50) {
+			tracker.studied = true;
+		} else if(tracker == islandStudying && state.time > 60) {
+			tracker.studied = true;
+		}
 	}
 
 	// Just a simple guard to make sure we don't do this by accident
 	if(tracker.studied) {
-		debug("Study complete, why checking progress? Shouldn't happen");
+		msg("Study complete, why checking progress? Shouldn't happen");
 		return;
 	}
 
@@ -575,6 +667,9 @@ function checkStudyingProgress(tracker) {
 		tracker.studiedTime +=
 			tracker.studiersRequired < units ? 0 :
 			tracker.studiersRequired == units ? 0.5 : 0.5 = (0.15 * units - tracker.studiersRequired);
+
+		if(toInt(state.time) % 3 == 0)
+			msg("Progress: " + tracker.studiedTime);
 	}
 
 	// Once we finish studying we can show the dialog and finish this part of the quest
@@ -591,6 +686,135 @@ function checkStudyingProgress(tracker) {
  */
 function checkSpirits() {
 
+	if(INVASION_SECOND_STARTING_WAVE_ZONES.length != 0 && SPIRIT_DATA.timeToSecondWaveInvasionZones < state.time) {
+
+		// We don't want to accidentally add in zones that have already been taken
+		// or are new candidates for invading already.
+		for(z in LOST_ZONES.concat(INVASION_ZONES)) {
+			INVASION_SECOND_STARTING_WAVE_ZONES.remove(z);
+		}
+		INVASION_ZONES = INVASION_ZONES.concat(INVASION_SECOND_STARTING_WAVE_ZONES);
+	}
+
+	prepareNewAttacks();
+
+	launchPreparedAttacks();
+
+	manageCurrentAttacks();
+}
+
+function launchPreparedAttacks() {
+	for(attack in SPIRIT_DATA.attackData) {
+		if(!attack.attackedYet && attack.attackTime < state.time) {
+			addFoes([{z:attack.zone.id, u:Unit.SpecterWarrior, nb:attack.spiritCount}]);
+			attack.attackedYet = true;
+		}
+	}
+}
+
+function manageCurrentAttacks() {
+	var failedAttacks = [];
+	var uncontestedAttacks = [];
+	for(attack in SPIRIT_DATA.attackData) {
+		var units = attack.zone.units;
+		var ghosts = 0;
+		var playerUnits = 0;
+		for(u in units) {
+			if(u.kind == Unit.SpecterWarrior)
+				ghosts++;
+			else if(u.owner == human)
+				playerUnits++;
+		}
+
+		// If all ghosts are dead, this attack ends and will be cleaned up
+		if(ghosts == 0){
+			failedAttacks.push(attack);
+		}
+
+		// If no player units are present, then the ghosts earn progress towards capturing
+		else if(playerUnits == 0) {
+			attack.captureProgress += 0.5;
+			if(attack.captureProgress >= SPIRIT_DATA.timeToCaptureSeconds) {
+				ghostsTakeZone(attack.zone);
+			}
+		}
+
+		// otherwise we lose progress; the ghosts are being attacked! :O
+		else{
+			attack.captureProgress = 0;
+		}
+	}
+
+	// we couldn't do this in the previous loop as we would be modifying an array while iterating over it.
+	for(f in failedAttacks) {
+		SPIRIT_DATA.attackData.remove(f);
+	}
+}
+
+/**
+ * If a ghost sits in a zone too long uncontested, then the ghost takes it.
+ * This will cover the zone, prevent the player from scounting it, and add all its
+ * neighbors (except the safe zones) as candidates to be invaded next.
+ */
+function ghostsTakeZone(zone:Zone) {
+	human.coverZone(zone);
+	zone.allowScouting = false;
+	INVASION_ZONES.remove(zone.id);
+
+	// Add all neighbor zones as targets for invasion.
+	for(z in zone.next) {
+		if(INVASION_ZONES.indexOf(z.id) == -1 && LOST_ZONES.indexOf(z.id) == -1 && SAFE_ZONES.indexOf(z.id) == -1)
+			INVASION_ZONES.push(z.id);
+	}
+}
+
+function prepareNewAttacks() {
+	// Attacks will only start under these two conditions.
+	// This is to: help players who are new and need the extra time so they get the full year before the first attack wave
+	// For experienced players, this helps to slow them down if they rush objectives.
+	if(graveYardStudying.studied || state.time > SPIRIT_DATA.timeToFirstAttackSeconds) {
+		var delta = state.time - 660; // TODO SPIRIT_DATA.timeOfLastAttackSent
+		delta = delta < 0 ? 0 : delta; // If the player rushes the second objective before Y2, this can be negative.
+		var proba = delta / 240.0; // normalize the distribution over 240 seconds.
+		var prevAttackTime = SPIRIT_DATA.deltaOnPreviousAttack;
+		var currentYear = timeToYears(state.time);
+
+		// we apply a slight linear shift in the probability of an attack to make back-to-back slightly less likely, and longer than the threshold slightly more likely
+		if(SPIRIT_DATA.deltaOnPreviousAttack >= 0) {
+			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.8 : proba * 1.1;
+		}
+
+		if(proba < random()){
+			var min = toInt(SPIRIT_DATA.spiritMin + (SPIRIT_DATA.spiritMinGrowth * currentYear));
+			var max = toInt(SPIRIT_DATA.spiritMax + (SPIRIT_DATA.spiritMaxGrowth * currentYear));
+
+			// We add one as randomInt works 0 inclusively to max exclusively
+			var spirits = randomInt((max - min) + 1) + min;
+
+			// We don't want to send an attack where we are currently attacking
+			var choices = [].concat(INVASION_ZONES);
+			for(a in SPIRIT_DATA.attackData)
+				choices.remove(a.zone.id);
+			var zoneId = choices[randomInt(choices.length)];
+
+			// determine warning
+			var warning = SPIRIT_DATA.warningBetweenAttacksSeconds - (SPIRIT_DATA.warningBetweenAttacksSecondsGrowth * currentYear);
+			warning = warning < SPIRIT_DATA.warningBetweenAttacksMinimum ? SPIRIT_DATA.warningBetweenAttacksMinimum : warning;
+
+			populateAttackData(getZone(zoneId), spirits, warning + state.time);
+		}
+	}
+}
+
+function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
+	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, objId:null, attackedYet:false});
+}
+
+/**
+ * Returns a whole number of years that have passed.
+ */
+function timeToYears(time:Float):Int {
+	return toInt(time / 720.0);
 }
 
 /**
@@ -661,6 +885,17 @@ function giveResources(res:Array<{res:ResourceKind, amt:Int}>) {
 	}
 }
 
+/**
+ * Given a Month and Year, it will return the number of real time seconds that
+ * represents. A Month is defined as 60 seconds long. One year is therefore
+ * 720 seconds or 12 minutes.
+ */
+function calToSeconds(month:Int, year:Int) {
+
+	// 60 seconds per month, and 12 months in a year
+	return month * 60 + year * 60 * 12;
+}
+
 
 /**
  * ======================================================
@@ -687,6 +922,15 @@ function pauseAndShowDialog(dialog) {
 		}
 		setPause(false);
 	}
+}
+
+/**
+ * A wrapper that makes sure debug messages are only printed if turned on. Makes cleaning
+ * up for publishing to steam workshop easier.
+ */
+function msg(m:String) {
+	if(DEBUG.MESSAGES)
+		debug(m);
 }
 
 /**
