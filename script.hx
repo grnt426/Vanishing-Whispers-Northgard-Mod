@@ -1,4 +1,4 @@
-/**
+/*
  * ================================================
  * 			Drage Ander Island
  * 			Dragon Spirits Island
@@ -8,12 +8,16 @@
  * ================================================
  */
 
+/**
+ *  The human player playing this mod :)
+ */
 var human:Player;
 
 var START_ZONE_ID: Int = 65;
 var MYSTERY_ZONE_ID: Int = 8;
 var GRAVEYARD_ZONE_ID: Int = 72;
 var PORT_ZONE_ID: Int = 39;
+var PORT_LAUNCH_ZONE_ID: Int = 20;
 var LORE_CIRCLE_ZONE_IDS = [41, 45];
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
@@ -27,8 +31,63 @@ var DIALOG_SUPPRESSED_TIMEOUT:Int = 60;
 
 var TIME_TO_OPENING_DIALOG:Int = 15;
 
+var ENDING_NEUTRAL = "neutral";
+var ENDING_GOOD = "good";
+var ENDING_BAD = "bad";
+
+var SACRIFICE_UNITS_OBJ_ID = "SacrificeUnits";
+
+var currentEnding = ENDING_BAD; // This is the current ending the player will get after studying the stones on the mystery island
+var endingObjectiveShown:Bool = false;
+
+var SHIP_DATA = {
+	objId: "shipunits",
+	objName: "Ship units: 150 Wood, 75 Krowns",
+	resources:[{res:Resource.Wood, amt:150}, {res:Resource.Money, amt:75}],
+	callback:"shipUnitsCallback",
+	shipUnitsCallbackPressed:false,
+};
+
 var SPIRIT_DATA = {
 
+};
+
+var KOBOLD_DATA = {
+	befriended: false,
+	enemy: false,
+	initialContact: false,
+	attackKoboldObjId: "Remove the Kobolds",
+};
+
+var GIANT_DATA = {
+	befriended: false,
+	enemy: false,
+	initialContact: false,
+	attackKoboldObjId: "Remove the Giants",
+
+	destroyReward:[{res:Resource.Wood, amt:200}, {res:Resource.Food, amt:200}],
+	destroyTechReward:[Tech.BFTower, Tech.Warcraft], // upgraded towers and warcraft (mil XP => lore&fame)
+
+	befriendReward:3, // free feasts
+};
+
+badEnding = {
+	villagersSacrificed:0,
+	sacrificesRequred:12,
+	objectiveId: "SacrificesMade",
+	objectiveName: "Appease the Island to Escape",
+	progressId:"VillagerSacrifice",
+	progressName:"Sacrifice ::value:: units",
+	sacrificeButtonPressed: false,
+};
+
+neutralEnding = {
+	resources: [{res:Resource.Wood, amt:900, objId:"Wood Needed"}, {res:Resource.Food, amt:500, objId:"Food Needed"},
+			{res:Resource.Iron, amt:15, objId:"Iron Needed"}, {res:Resource.Money, amt:400, objId:"Krowns Needed"}],
+};
+
+goodEnding = {
+	// TODO: requires the most work.
 };
 
 var DIALOG = {
@@ -82,7 +141,31 @@ var DIALOG = {
 	],
 
 	stone_circle_finish:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We will need large ships to fit all the runes necessary to make this work, but we can finally get off the island."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Not soon enough if you ask me. These spirit attacks are getting really strong."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Some bad news. We will need to leave from the northern most part of the island. The runes are most powerful in that direction."},
+	],
 
+	arrive_at_island:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Amazing! There were dragonkin on this island. But why? And how did they have access to such powerful runes?"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We will need to immediately study these stones. Hopefully we have enough villagers to spare to research quickly."},
+	],
+
+	// placeholder as the struct needs something
+	island_finish_placeholder:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Finished Island"},
+	],
+
+	island_finish_good:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Good ending text"},
+	],
+
+	island_finish_neutral:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"neutral ending text"},
+	],
+
+	island_finish_bad:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending text"},
 	],
 };
 
@@ -115,8 +198,19 @@ var stoneCircleStudying = {
 	studied:false,
 	studiersRequired:3,
 	zoneIds:LORE_CIRCLE_ZONE_IDS,
-	startDialog:DIALOG.stone_circle_start,
-	finishDialog:DIALOG.stone_circle_finish,
+	startDialog:DIALOG.graveyard_study_start,
+	finishDialog:DIALOG.graveyard_study_finish,
+}
+
+var islandStudying = {
+	firstAssign:true,
+	studiedTime:0.0,
+	studyTimeRequired:90,
+	studied:false,
+	studiersRequired:1,
+	zoneIds:[MYSTERY_ZONE_ID],
+	startDialog:DIALOG.arrive_at_island,
+	finishDialog:DIALOG.island_finish_placeholder,
 }
 
 /**
@@ -139,10 +233,20 @@ function onFirstLaunch() {
 	var hall = human.getTownHall();
 	summonWarchief(human, getZone(START_ZONE_ID), hall.x + 7, hall.y + 7);
 
+	human.addResource(Resource.Wood, 1000);
+	human.addResource(Resource.Money, 1000);
+
 	debug("setting up obj");
 	setupObjectives();
 
-	human.discoverZone(getZone(STARTER_CARVED_STONE_TILE_ID)); // TODO FOR TESTING
+	var z = getZone(PORT_ZONE_ID);
+	human.discoverZone(z); // TODO FOR TESTING
+	human.discoverZone(getZone(MYSTERY_ZONE_ID));
+	human.takeControl(getZone(MYSTERY_ZONE_ID));
+	human.coverZone(getZone(MYSTERY_ZONE_ID));
+	killAllUnits([z]);
+	human.takeControl(z);
+	getZone(PORT_ZONE_ID).addUnit(Unit.Villager, 10, human);
 }
 
 /**
@@ -158,8 +262,20 @@ function regularUpdate(dt : Float) {
 
 	checkSpirits();
 
+	checkKobolds();
+
+	checkGiants();
+
 	if(toInt(state.time) % 10 == 0)
 		debug("running...");
+}
+
+function checkKobolds() {
+
+}
+
+function checkGiants() {
+
 }
 
 /**
@@ -169,6 +285,49 @@ function checkObjectives() {
 
 	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
 		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	}
+
+	if(SHIP_DATA.shipUnitsCallbackPressed) {
+		SHIP_DATA.shipUnitsCallbackPressed = false;
+		if(meetsRequirements(SHIP_DATA.resources) && getZone(PORT_ZONE_ID).units.length > 0) {
+			takeResources(SHIP_DATA.resources);
+
+			// only move so many units at a time, picking randomly
+			var units = [].concat(getZone(PORT_ZONE_ID).units.slice(0, 4));
+			var types = [];
+			for(u in units) {
+				types.push(u.kind);
+				u.die(true, false);
+			}
+			human.discoverZone(getZone(MYSTERY_ZONE_ID));
+			drakkar(human, getZone(MYSTERY_ZONE_ID), getZone(PORT_LAUNCH_ZONE_ID), 0, 0, types, .1);
+		}
+	}
+
+	switch(currentEnding) {
+		case ENDING_BAD:
+
+			// We do a lot of "heavy lifting" in scanning for units, so this has to be in regularUpdate
+			if(badEnding.sacrificeButtonPressed) {
+				badEnding.sacrificeButtonPressed = false;
+				var units = getZone(MYSTERY_ZONE_ID).zone.units;
+
+				// we need to make a copy. The original array will have units deleted from it as we kill them
+				// which will mean the array will shrink as we iterate over it, resulting in
+				// only CEIL(n/2) dying instead.
+				var killEm = [].concat(units);
+				badEnding.villagersSacrificed += units.length;
+
+				for(u in killEm){
+					u.die(false, true);
+				}
+				debug("Finished killing");
+
+				if(badEnding.villagersSacrificed >= badEnding.sacrificesRequred)
+					state.objectives.setStatus(badEnding.progressId, OStatus.Done);
+			}
+
+			state.objectives.setCurrentVal(badEnding.progressId, badEnding.villagersSacrificed);
 	}
 }
 
@@ -211,6 +370,28 @@ function checkStudying() {
 		checkStudyingProgress(graveYardStudying);
 	else if(!stoneCircleStudying.studied)
 		checkStudyingProgress(stoneCircleStudying);
+	else if(!islandStudying.studied)
+		checkStudyingProgress(islandStudying);
+
+	if(islandStudying.studied) {
+		switch(currentEnding) {
+			case ENDING_BAD: setupBadEnding();
+			case ENDING_NEUTRAL: setupNeutralEnding();
+			case ENDING_GOOD: setupGoodEnding();
+		}
+	}
+}
+
+function setupBadEnding() {
+
+}
+
+function setupNeutralEnding() {
+
+}
+
+function setupGoodEnding() {
+
 }
 
 /**
@@ -236,7 +417,7 @@ function checkStudyingProgress(tracker) {
 		// a slight bonus is applied
 		tracker.studiedTime +=
 			tracker.studiersRequired < units ? 0 :
-			tracker.studiersRequired == units ? 0.5 : 0.7;
+			tracker.studiersRequired == units ? 0.5 : 0.5 = (0.15 * units - tracker.studiersRequired);
 	}
 
 	if(!tracker.studied && tracker.studiedTime > tracker.studyTimeRequired) {
@@ -282,6 +463,46 @@ function disableDialogCallback() {
 	state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
 }
 
+function shipUnitsCallback() {
+	SHIP_DATA.shipUnitsCallbackPressed = true;
+}
+
+function sacrificeUnitsCallback() {
+	// We can't do a lot of work in a callback (it won't finish), so instead we will mark expensive actions,
+	// like searching a zone, for completion during the regularUpdate call.
+	badEnding.sacrificeButtonPressed = true;
+}
+
+/**
+ * Given an array of resources structs {Resource, Int}, will return True if the player has all the resources
+ */
+function meetsRequirements(res:Array<{res:ResourceKind, amt:Int}>): Bool {
+	for(r in res) {
+		if(human.getResource(r.res) < r.amt)
+			return false;
+	}
+
+	return true;
+}
+
+/**
+ * Given an array of resources structs {Resource, Int}, will take the resources from the player
+ */
+function takeResources(res:Array<{res:ResourceKind, amt:Int}>) {
+	for(r in res) {
+		human.addResource(r.res, r.amt * -1); // we can use this function to take resources by turning it negative
+	}
+}
+
+/**
+ * Given an array of resources structs {Resource, Int}, will give the resources to the player
+ */
+function giveResources(res:Array<{res:ResourceKind, amt:Int}>) {
+	for(r in res) {
+		human.addResource(r.res, r.amt);
+	}
+}
+
 
 /**
  * ======================================================
@@ -295,6 +516,12 @@ function disableDialogCallback() {
  * A helper function to show multiple lines of text.
  */
 function pauseAndShowDialog(dialog) {
+
+	// The checkStudying function may pass in empty dialog, which is fine,
+	// we just don't want to pause and unpause unnecessarily.
+	if(dialog.length == 0)
+		return;
+
 	if(!DIALOG_SUPPRESSED) {
 		setPause(true);
 		for(d in dialog) {
@@ -304,7 +531,17 @@ function pauseAndShowDialog(dialog) {
 	}
 }
 
+/**
+ * Objectives show up on the screen in the order they were added, so the ordering below
+ * is somewhat odd, but is meant to help ensure the most primary focus is near the top.
+ */
 function setupObjectives() {
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
+	state.objectives.add(badEnding.objectiveId, badEnding.objectiveName, {visible:true});
+	state.objectives.add(badEnding.progressId, badEnding.progressName, {visible:true, showProgressBar:true, goalVal:badEnding.sacrificesRequred});
+
 	state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
+
+	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:true}, {name:"Ship Units", action:SHIP_DATA.callback});
+	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:true}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
 }
