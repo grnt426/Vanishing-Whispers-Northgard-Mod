@@ -13,6 +13,11 @@
  */
 var human:Player;
 
+DEBUG = {
+	SKIP_STUDYING: false,
+	MESSAGES: true,
+}
+
 var START_ZONE_ID: Int = 65;
 var MYSTERY_ZONE_ID: Int = 8;
 var GRAVEYARD_ZONE_ID: Int = 72;
@@ -71,24 +76,7 @@ var GIANT_DATA = {
 	befriendReward:3, // free feasts
 };
 
-badEnding = {
-	villagersSacrificed:0,
-	sacrificesRequred:12,
-	objectiveId: "SacrificesMade",
-	objectiveName: "Appease the Island to Escape",
-	progressId:"VillagerSacrifice",
-	progressName:"Sacrifice ::value:: units",
-	sacrificeButtonPressed: false,
-};
 
-neutralEnding = {
-	resources: [{res:Resource.Wood, amt:900, objId:"Wood Needed"}, {res:Resource.Food, amt:500, objId:"Food Needed"},
-			{res:Resource.Iron, amt:15, objId:"Iron Needed"}, {res:Resource.Money, amt:400, objId:"Krowns Needed"}],
-};
-
-goodEnding = {
-	// TODO: requires the most work.
-};
 
 var DIALOG = {
 	opening:[
@@ -165,8 +153,50 @@ var DIALOG = {
 	],
 
 	island_finish_bad:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending text"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending research finish text, escape start"},
 	],
+
+	bad_ending_success:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending successful, escape message"},
+	],
+
+	bad_ending_failure:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending failure, chastise the player :P"},
+	],
+};
+
+BAD_ENDING_DATA = {
+	villagersSacrificed:0,
+	sacrificesRequred:12,
+	objectiveId: "AppeaseTheIsland",
+	objectiveName: "Appease the Island to Escape",
+	progressId:"VillagerSacrifice",
+	progressName:"Sacrifice ::value:: units",
+	sacrificeButtonPressed: false,
+	currentlySacrificing: false,
+
+	escapeObjId:"EscapeTheIslandWithWarChief",
+	escapeObjName: "Escape the Island with your Warchief at the North. Gather 200 Wood, 150 Food, 100 Krowns, and 5 Stone.",
+	escapeObjResourceRequirements: [{res:Resource.Wood, amt:200}, {res:Resource.Food, amt:150}, {res:Resource.Money, amt:100}, {res:Resource.Stone, amt:5}],
+	currentlyEscaping:false,
+
+	revealDialog: DIALOG.island_finish_bad,
+	successDialog: DIALOG.bad_ending_success,
+	failedDialog: DIALOG.bad_ending_failure,
+
+	finished:false, // This will be set to true if the player wins or loses, so as to trigger a delay after the dialog before end game screen
+	successfullyFinished: false, // Will only be set True if the player escapes the island with their WC
+	timeFinished:100000.0,
+
+};
+
+neutralEnding = {
+	resources: [{res:Resource.Wood, amt:900, objId:"Wood Needed"}, {res:Resource.Food, amt:500, objId:"Food Needed"},
+			{res:Resource.Iron, amt:15, objId:"Iron Needed"}, {res:Resource.Money, amt:400, objId:"Krowns Needed"}],
+};
+
+goodEnding = {
+	// TODO: requires the most work.
 };
 
 var starterStone = {
@@ -178,6 +208,7 @@ var starterStone = {
 	zoneIds:[STARTER_CARVED_STONE_TILE_ID],
 	startDialog:DIALOG.starter_stone,
 	finishDialog:DIALOG.starter_stone_studied,
+	setupFinished:true,
 }
 
 var graveYardStudying = {
@@ -189,6 +220,7 @@ var graveYardStudying = {
 	zoneIds:[GRAVEYARD_ZONE_ID],
 	startDialog:DIALOG.graveyard_study_start,
 	finishDialog:DIALOG.graveyard_study_finish,
+	setupFinished:true,
 }
 
 var stoneCircleStudying = {
@@ -200,6 +232,7 @@ var stoneCircleStudying = {
 	zoneIds:LORE_CIRCLE_ZONE_IDS,
 	startDialog:DIALOG.graveyard_study_start,
 	finishDialog:DIALOG.graveyard_study_finish,
+	setupFinished:true,
 }
 
 var islandStudying = {
@@ -211,6 +244,7 @@ var islandStudying = {
 	zoneIds:[MYSTERY_ZONE_ID],
 	startDialog:DIALOG.arrive_at_island,
 	finishDialog:DIALOG.island_finish_placeholder,
+	setupFinished:false,
 }
 
 /**
@@ -239,14 +273,22 @@ function onFirstLaunch() {
 	debug("setting up obj");
 	setupObjectives();
 
+	// ---- TESTING FOR BAD ENDING
 	var z = getZone(PORT_ZONE_ID);
 	human.discoverZone(z); // TODO FOR TESTING
 	human.discoverZone(getZone(MYSTERY_ZONE_ID));
+	human.discoverZone(getZone(57));
+	human.discoverZone(getZone(50));
 	human.takeControl(getZone(MYSTERY_ZONE_ID));
 	human.coverZone(getZone(MYSTERY_ZONE_ID));
-	killAllUnits([z]);
+	killAllUnits([z, getZone(57), getZone(50)]);
 	human.takeControl(z);
-	getZone(PORT_ZONE_ID).addUnit(Unit.Villager, 10, human);
+	getZone(PORT_ZONE_ID).addUnit(Unit.Villager, 14, human);
+	BAD_ENDING_DATA.currentlySacrificing = true;
+	human.addResource(Resource.Food, 500);
+	human.addResource(Resource.Stone, 5);
+
+	// ---- END TESTING FOR BAD ENDING
 }
 
 /**
@@ -266,8 +308,28 @@ function regularUpdate(dt : Float) {
 
 	checkGiants();
 
+	checkEndGame();
+
 	if(toInt(state.time) % 10 == 0)
 		debug("running...");
+}
+
+/**
+ * This triggers the Game end victory/defeat for the player; showing the shining or broken shield, and allowing the player to quit.
+ * In all cases, a slight delay is applied to when the player won after the dialog finishes before transitioning.
+ */
+function checkEndGame() {
+	switch(currentEnding) {
+		case ENDING_BAD:
+			if(BAD_ENDING_DATA.finished && BAD_ENDING_DATA.timeFinished + 4 < state.time) {
+				if(BAD_ENDING_DATA.successfullyFinished) {
+					human.customVictory("You have escaped Drage Ander!", "placeholder");
+				}
+				else{
+					customDefeat("You have failed to escape Drage Ander, and your soul is trapped forever beneath the island");
+				}
+			}
+	}
 }
 
 function checkKobolds() {
@@ -285,6 +347,12 @@ function checkObjectives() {
 
 	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
 		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	}
+
+	if(stoneCircleStudying.studied && !islandStudying.setupFinished) {
+		debug("Setting up ship data for mystery island.");
+		islandStudying.setupFinished = true;
+		state.objectives.setVisible(SHIP_DATA.objId, true);
 	}
 
 	if(SHIP_DATA.shipUnitsCallbackPressed) {
@@ -305,29 +373,101 @@ function checkObjectives() {
 	}
 
 	switch(currentEnding) {
-		case ENDING_BAD:
+		case ENDING_BAD: manageBadEndingObjectives();
+	}
+}
 
-			// We do a lot of "heavy lifting" in scanning for units, so this has to be in regularUpdate
-			if(badEnding.sacrificeButtonPressed) {
-				badEnding.sacrificeButtonPressed = false;
-				var units = getZone(MYSTERY_ZONE_ID).zone.units;
+/**
+ * The bad ending is a two-part quest, caused because the player was a terrible
+ * person to the neutrals on the island.
+ *
+ * 				---- PART ONE ----
+ * The first part requires sacrificing units to the altar after shipping over the units
+ * in cheap boats. Any units sitting on the port tile will get shipped. If more than four,
+ * then units are randomly picked. Once the sufficient sacrificecs are made, this part completes.
+ * The second part of the quest will then immediately trigger.
+ *
+ * TODO: maybe purposefully exclude the WC so as to not frustate the player?
+ * TODO: maybe prioritize villagers before anything else?
+ *
+ * 				---- PART TWO ----
+ * This part is passive. As long as the player has the resources needed to build the ship and their
+ * warchief on the port tile, they will automatically escape, triggering an expositional dialog, and then victory.
+ */
+function manageBadEndingObjectives() {
 
-				// we need to make a copy. The original array will have units deleted from it as we kill them
-				// which will mean the array will shrink as we iterate over it, resulting in
-				// only CEIL(n/2) dying instead.
-				var killEm = [].concat(units);
-				badEnding.villagersSacrificed += units.length;
+	// PART ONE
+	if(BAD_ENDING_DATA.currentlySacrificing) {
+		// We do a lot of "heavy lifting" in scanning for units, so this has to be in regularUpdate
+		if(BAD_ENDING_DATA.sacrificeButtonPressed) {
+			BAD_ENDING_DATA.sacrificeButtonPressed = false;
+			var units = getZone(MYSTERY_ZONE_ID).zone.units;
 
-				for(u in killEm){
-					u.die(false, true);
+			// we need to make a copy. The original array will have units deleted from it as we kill them
+			// which will mean the array will shrink as we iterate over it, resulting in
+			// only CEIL(n/2) dying instead.
+			var killEm = [].concat(units);
+			BAD_ENDING_DATA.villagersSacrificed += units.length;
+
+			for(u in killEm){
+				u.die(false, true);
+			}
+			debug("Finished killing");
+		}
+
+		if(BAD_ENDING_DATA.villagersSacrificed >= BAD_ENDING_DATA.sacrificesRequred) {
+
+			// Cleanup the sacrifice stuff
+			state.objectives.setStatus(BAD_ENDING_DATA.progressId, OStatus.Done);
+			state.objectives.setVisible(SHIP_DATA.objId, false);
+			state.objectives.setVisible(SACRIFICE_UNITS_OBJ_ID, false);
+			state.objectives.setStatus(BAD_ENDING_DATA.objectiveId, OStatus.Done);
+
+			// TODO show dialog to escape
+
+			// Show the final step in the quest, escape with your warchief
+			BAD_ENDING_DATA.currentlyEscaping = true;
+			BAD_ENDING_DATA.currentlySacrificing = false;
+			state.objectives.setVisible(BAD_ENDING_DATA.escapeObjId, true);
+		}
+
+		state.objectives.setCurrentVal(BAD_ENDING_DATA.progressId, BAD_ENDING_DATA.villagersSacrificed);
+	}
+
+	// PART TWO
+	else if(BAD_ENDING_DATA.currentlyEscaping) {
+
+		// This helps provide a slight delay, so the player sees they completed the objective before it fades
+		if(state.objectives.isVisible(BAD_ENDING_DATA.progressId))
+			state.objectives.setVisible(BAD_ENDING_DATA.progressId, false);
+
+		if(meetsRequirements(BAD_ENDING_DATA.escapeObjResourceRequirements)) {
+			var units = getZone(PORT_ZONE_ID).units;
+			var wcOnTile = false;
+			for(u in units) {
+				if(u == human.getWarchief()) {
+					u.die(true, false);
+					wcOnTile = true;
 				}
-				debug("Finished killing");
-
-				if(badEnding.villagersSacrificed >= badEnding.sacrificesRequred)
-					state.objectives.setStatus(badEnding.progressId, OStatus.Done);
 			}
 
-			state.objectives.setCurrentVal(badEnding.progressId, badEnding.villagersSacrificed);
+			if(wcOnTile) {
+
+				// This isn't really necessary, as the player will shortly win anyway, but it may make it seem
+				// like the player just barely escaped, which is a good feeling
+				takeResources(BAD_ENDING_DATA.escapeObjResourceRequirements);
+
+				state.objectives.setStatus(PRIMARY_OBJ_ID, OStatus.Done);
+				state.objectives.setStatus(BAD_ENDING_DATA.escapeObjId, OStatus.Done);
+
+				// TODO: show a ship leaving, maybe?
+
+				pauseAndShowDialog(BAD_ENDING_DATA.successDialog);
+				BAD_ENDING_DATA.finished = true;
+				BAD_ENDING_DATA.timeFinished = state.time;
+				BAD_ENDING_DATA.successfullyFinished = true; // Hooray! You are a terrible person that killed their followers to get your own skin to safety! Yay! :D
+			}
+		}
 	}
 }
 
@@ -372,8 +512,8 @@ function checkStudying() {
 		checkStudyingProgress(stoneCircleStudying);
 	else if(!islandStudying.studied)
 		checkStudyingProgress(islandStudying);
-
-	if(islandStudying.studied) {
+	else if(!endingObjectiveShown) {
+		endingObjectiveShown = true;
 		switch(currentEnding) {
 			case ENDING_BAD: setupBadEnding();
 			case ENDING_NEUTRAL: setupNeutralEnding();
@@ -383,7 +523,11 @@ function checkStudying() {
 }
 
 function setupBadEnding() {
+	state.objectives.setVisible(BAD_ENDING_DATA.objectiveId, true);
+	state.objectives.setVisible(BAD_ENDING_DATA.progressId, true);
+	state.objectives.setVisible(SACRIFICE_UNITS_OBJ_ID, true);
 
+	pauseAndShowDialog(BAD_ENDING_DATA.revealDialog);
 }
 
 function setupNeutralEnding() {
@@ -400,10 +544,23 @@ function setupGoodEnding() {
  */
 function checkStudyingProgress(tracker) {
 
-	// checking number of units on a tile is expensive (esp if lots of units are in the tile, or multiple tiles)
-	// We don't want to incur that cost if the current objective is already finished
-	if(tracker.studied)
+	if(tracker == starterStone && state.time > 30) {
+		tracker.studied = true;
+	}
+	else if(tracker == graveYardStudying && state.time > 40) {
+		tracker.studied = true;
+	}
+	else if(tracker == stoneCircleStudying && state.time > 50) {
+		tracker.studied = true;
+	} else if(tracker == islandStudying && state.time > 60) {
+		tracker.studied = true;
+	}
+
+	// Just a simple guard to make sure we don't do this by accident
+	if(tracker.studied) {
+		debug("Study complete, why checking progress? Shouldn't happen");
 		return;
+	}
 
 	var units = countUnitTypesOnTile(tracker.zoneIds, Unit.RuneMaster);
 
@@ -420,6 +577,7 @@ function checkStudyingProgress(tracker) {
 			tracker.studiersRequired == units ? 0.5 : 0.5 = (0.15 * units - tracker.studiersRequired);
 	}
 
+	// Once we finish studying we can show the dialog and finish this part of the quest
 	if(!tracker.studied && tracker.studiedTime > tracker.studyTimeRequired) {
 		tracker.studied = true;
 		pauseAndShowDialog(tracker.finishDialog);
@@ -470,7 +628,7 @@ function shipUnitsCallback() {
 function sacrificeUnitsCallback() {
 	// We can't do a lot of work in a callback (it won't finish), so instead we will mark expensive actions,
 	// like searching a zone, for completion during the regularUpdate call.
-	badEnding.sacrificeButtonPressed = true;
+	BAD_ENDING_DATA.sacrificeButtonPressed = true;
 }
 
 /**
@@ -537,11 +695,17 @@ function pauseAndShowDialog(dialog) {
  */
 function setupObjectives() {
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
-	state.objectives.add(badEnding.objectiveId, badEnding.objectiveName, {visible:true});
-	state.objectives.add(badEnding.progressId, badEnding.progressName, {visible:true, showProgressBar:true, goalVal:badEnding.sacrificesRequred});
+
+	// Good, Neutral, Bad primary objectives
+	state.objectives.add(BAD_ENDING_DATA.objectiveId, BAD_ENDING_DATA.objectiveName, {visible:false});
+	state.objectives.add(BAD_ENDING_DATA.progressId, BAD_ENDING_DATA.progressName, {visible:false, showProgressBar:true, goalVal:BAD_ENDING_DATA.sacrificesRequred});
+
+	// Good, Neutral, Bad secondary objectives
+	state.objectives.add(BAD_ENDING_DATA.escapeObjId, BAD_ENDING_DATA.escapeObjName, {visible:false});
 
 	state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
 
-	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:true}, {name:"Ship Units", action:SHIP_DATA.callback});
-	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:true}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
+	// Misc objectivs, or actionable buttons for objectives
+	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
+	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:false}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
 }
