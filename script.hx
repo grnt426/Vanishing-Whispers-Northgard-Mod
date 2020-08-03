@@ -13,13 +13,13 @@
  */
 var human:Player;
 
-var VERSION = "1.1.1";
+var VERSION = "1.2";
 
 DEBUG = {
-	SKIP_STUDYING: true,
+	SKIP_STUDYING: false,
 	MESSAGES: false,
-	SPIRITS_FAST: true,
-	BAD:true, // setup debug for bad ending
+	SPIRITS_FAST: false,
+	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
 
@@ -80,6 +80,8 @@ var INVASION_SECOND_STARTING_WAVE_ZONES = [25, 37, 38, 41, 45, 50, 72];
 var LOST_ZONES = [];
 
 var PRIMARY_OBJ_ID = "primaryobjid";
+var WARCHIEF_ALIVE_OBJ_ID = "warchiefaliveID";
+var warchiefUnit:Unit;
 var NONE_FORMAT = "NONE";
 
 var DIALOG_SUPPRESS_ID = "dialogsuppressid";
@@ -161,6 +163,22 @@ var SPIRIT_DATA = {
 	eastId:"eId",
 	southId:"sId",
 	westId:"wId",
+
+	/**
+	 * Triggers dialog once the first tile is taken.
+	 */
+	firstTileTaken:true,
+
+	/**
+	 * If the ghosts take this many tiles, the end-game objective will show warning the player to prevent further losses.
+	 */
+	tooManyTilesTakenThreshold:8,
+
+	/**
+	 * The number of tiles the ghosts can take before the player loses the game, after the threshold was reached.
+	 */
+	tilesLostRemaining:3,
+	tilesLostRemainingObjId:"tilesLostId",
 };
 
 var KOBOLD_DATA = {
@@ -289,6 +307,37 @@ var DIALOG = {
 	bad_ending_failure:[
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending failure, chastise the player :P"},
 	],
+
+	ghosts_take_first_tile:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"When the spirits take an area the fog is so dense that we can't get back in. We will have to defend the most important areas"},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"If they take so many areas that we can't get to the port, I fear we will be trapped here as the island is swallowed whole."},
+	],
+
+	ghosts_take_many_tiles:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"The ghosts are relentless in taking areas. If any more of the island is lost, so too will our expedition."},
+	],
+
+	ghosts_take_too_many_tiles:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The ghosts have captured too many tiles, and their piercing screams sound all around. We have lost."},
+	],
+
+	warchief_has_died:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"SVARN! He has been lost...this expedition is lost..."},
+	],
+
+	/**
+	 * For the good ending, when dying in battle.
+	 */
+	warchief_sacrificed:[
+
+	],
+
+	/**
+	 * If the warchief dies when the angry spirits spawn, but does not die in battle to them.
+	 */
+	warchief_died_good_ending:[
+
+	],
 };
 
 var BAD_ENDING_DATA = {
@@ -392,18 +441,21 @@ function onFirstLaunch() {
 	// Disabled events. We shall send our own >:)
 	noEvent();
 
-	// I would use me(), but the Editor thinks it is broken even though it works,
-	// but then it won't show any other errors :(
-	msg("getting human");
-	human = getZone(START_ZONE_ID).owner;
+	msg("Setting up human player data");
+	human = me();
 	var hall = human.getTownHall();
-	summonWarchief(human, getZone(START_ZONE_ID), hall.x + 7, hall.y + 7);
-
-	msg("setting up obj");
-	setupObjectives();
+	warchiefUnit = summonWarchief(human, getZone(START_ZONE_ID), hall.x + 7, hall.y + 7);
 	human.addResource(Resource.Food, 150);
 	human.addResource(Resource.Wood, 150);
 	human.addResource(Resource.Money, 75);
+
+	msg("setting up obj");
+	setupObjectives();
+
+	msg("Checking debug data setup");
+
+	// Clean up type data placeholders
+	SPIRIT_DATA.attackData.pop();
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
@@ -423,10 +475,6 @@ function onFirstLaunch() {
 	}
 
 	// ---- END TESTING FOR BAD ENDING
-
-
-	// Clean up type data placeholders
-	SPIRIT_DATA.attackData.pop();
 
 	if(DEBUG.SPIRITS_FAST) {
 		SPIRIT_DATA.timeToFirstAttackSeconds = 30;
@@ -504,6 +552,8 @@ function checkObjectives() {
 		state.objectives.setVisible(SHIP_DATA.objId, true);
 	}
 
+	checkWarchiefAlive();
+
 	if(SHIP_DATA.shipUnitsCallbackPressed) {
 
 		// Only reveal the island after sending the first boat of units
@@ -534,6 +584,35 @@ function checkObjectives() {
 	switch(currentEnding) {
 		case ENDING_BAD: manageBadEndingObjectives();
 	}
+}
+
+/**
+ * The warchief must be kept alive, or the mission is lost.
+ *
+ * The only exception is if we are in the GOOD ending.
+ */
+function checkWarchiefAlive() {
+	if(warchiefUnit.life <= 0) {
+		if(currentEnding == ENDING_GOOD) {
+			handleWarchiefDeathGoodEnding();
+		}
+		else{
+			state.objectives.setStatus(WARCHIEF_ALIVE_OBJ_ID, OStatus.Missed);
+			pauseAndShowDialog(DIALOG.warchief_has_died);
+			customDefeat("Svarn has fallen in battle and the spirits have taken your clan.");
+		}
+	}
+}
+
+/**
+ * For the good ending, the warchief must die in battle to one of the Angry Spirit incarnations to complete
+ * his self-sacrifice. Dying elsewhere will lose the mission.
+ *
+ * NOTE: battle here is described as "being in the same tile as one of the angry spirits", as I can't tell who
+ * killed a given unit anyway.
+ */
+function handleWarchiefDeathGoodEnding() {
+
 }
 
 /**
@@ -631,7 +710,9 @@ function manageBadEndingObjectives() {
 }
 
 /**
- * Manages sending dialog to the player at certain times or under certain conditions the player triggers
+ * Manages sending dialog to the player at certain times or under certain conditions the player triggers.
+ *
+ * We clear the dialog array after use as a simple method of not showing the same dialog twice.
  */
 function checkDialog() {
 	if(DIALOG.opening.length > 0 && TIME_TO_OPENING_DIALOG < state.time) {
@@ -651,6 +732,18 @@ function checkDialog() {
 		msg("Spirit Appears dialog shown");
 		pauseAndShowDialog(DIALOG.spirit_appears);
 		DIALOG.spirit_appears = [];
+	}
+
+	if(DIALOG.ghosts_take_first_tile.length > 0 && LOST_ZONES.length >= 1) {
+		msg("Spirits took first tile dialog shown");
+		pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
+		DIALOG.ghosts_take_first_tile = [];
+	}
+
+	if(DIALOG.ghosts_take_many_tiles.length > 0 && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
+		msg("Spirits took first tile dialog shown");
+		pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
+		DIALOG.ghosts_take_first_tile = [];
 	}
 }
 
@@ -1085,6 +1178,9 @@ function rarelyPrint(m:String) {
  */
 function setupObjectives() {
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
+
+	state.objectives.add(SPIRIT_DATA.tilesLostRemainingObjId, "Don't lose more territory to the ghosts", {visible:false, showProgressBar:true, goalVal:SPIRIT_DATA.tilesLostRemaining});
+	state.objectives.add(WARCHIEF_ALIVE_OBJ_ID, "Svarn must survive", {visible:true});
 
 	// Good, Neutral, Bad primary objectives
 	state.objectives.add(BAD_ENDING_DATA.objectiveId, BAD_ENDING_DATA.objectiveName, {visible:false});
