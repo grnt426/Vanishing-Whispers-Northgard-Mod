@@ -13,7 +13,7 @@
  */
 var human:Player;
 
-var VERSION = 1.1;
+var VERSION = "1.1.1";
 
 DEBUG = {
 	SKIP_STUDYING: true,
@@ -182,6 +182,28 @@ var GIANT_DATA = {
 	befriendReward:3, // free feasts
 };
 
+/**
+ * All the dialog used in the cutscenes
+ *
+ * A good chunk of the first few missions/actions in the game is here. However, much is missing.
+ * The dialog itself is also a rush job to get a feel for how it would it would sound and feel in game,
+ * and needs substantial editing and rewriting.
+ *
+ * MISSING:
+ * Dialog when a ghost first takes a tile
+ * Dialog for kobold quest
+ * 		Good ending
+ *  	Neutral/bad ending
+ * Dialog for giant quest
+ *  	Good ending
+ *  	Bad ending
+ * Dialog for sacrifices
+ * 		Perhaps dialog after first sacrifices
+ * dialog for escaping/winning
+ *
+ * entirety of neutral
+ * entirety of good
+ */
 var DIALOG = {
 	opening:[
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We have setup camp here on the center of the island. I can't wait to discover what is so mysterious here."},
@@ -891,13 +913,16 @@ function prepareNewAttacks() {
 function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
 
 	// find an unused objective
+	// TODO: maybe use a second queue to keep track of unused? More overhead but more obvious than this
 	var index = 0;
-	for(i in 0...10) {
+	var i = 0;
+	while(i < 10) {
 		if(SPIRIT_DATA.objectivesUsed.indexOf(i) == -1){
 			SPIRIT_DATA.objectivesUsed.push(i);
 			index = i;
 			break;
 		}
+		i++;
 	}
 
 	// prepare the objectives that will represent this attack.
@@ -1080,12 +1105,14 @@ function setupObjectives() {
 	state.objectives.add(SPIRIT_DATA.westId, "Attack In the West", {visible:false});
 
 	// There could feasibly be this many attacks at once, though I imagine at this point a player would lose....
-	for(i in 0...10) {
+	var i = 0;
+	while(i < 10) {
 		var obj = {id:i+"prepId", name:"Spirits are Preparing..."};
 		SPIRIT_DATA.preparedAttackObjs.push(obj);
 		state.objectives.add(obj.id, obj.name, {visible:false, showProgressBar:true, goalVal:100});
 		obj = {id:i+"capId", name:"Capturing Zone"};
 		SPIRIT_DATA.captureZoneObjs.push(obj);
 		state.objectives.add(obj.id, obj.name, {visible:false, showProgressBar:true, goalVal:100});
+		i++;
 	}
 }
