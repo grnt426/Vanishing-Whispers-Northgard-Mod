@@ -17,11 +17,13 @@ var VERSION = "1.2";
 
 DEBUG = {
 	SKIP_STUDYING: false,
-	MESSAGES: false,
+	MESSAGES: true,
 	SPIRITS_FAST: false,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
+
+	ALL_EXPLORED:true,
 
 	TIME_INDEX:0,
 }
@@ -77,7 +79,7 @@ var INVASION_SECOND_STARTING_WAVE_ZONES = [25, 37, 38, 41, 45, 50, 72];
 /**
  * These zones have been taken by the spirits and are lost.
  */
-var LOST_ZONES = [];
+var LOST_ZONES:Array<Int> = [];
 
 var PRIMARY_OBJ_ID = "primaryobjid";
 var WARCHIEF_ALIVE_OBJ_ID = "warchiefaliveID";
@@ -143,6 +145,8 @@ var SPIRIT_DATA = {
 	timeToFirstAttackSeconds:60 * 12, // 60 seconds per month, so not until Y2 starts.
 
 	timeToSecondWaveInvasionZones:60 * 12 * 3, // After 3 years we add in the second invasion waves candidate zones.
+
+	spawnFactor:24000.0, // Used to reduce the spawn rate
 
 	// The current ongoing attacks
 	attackData:[
@@ -476,12 +480,19 @@ function onFirstLaunch() {
 
 	// ---- END TESTING FOR BAD ENDING
 
+	if(DEBUG.ALL_EXPLORED){
+		human.discoverAll();
+	}
+
+	// Really amps up the attacks for testing
 	if(DEBUG.SPIRITS_FAST) {
 		SPIRIT_DATA.timeToFirstAttackSeconds = 30;
 		human.discoverAll();
 		SPIRIT_DATA.timeofLastAttackSent = 10.0;
 		SPIRIT_DATA.warningBetweenAttacksSeconds = 10;
+		SPIRIT_DATA.warningBetweenAttacksMinimum = 10;
 		SPIRIT_DATA.maxSimultaneousAttacks = 4;
+		SPIRIT_DATA.spawnFactor = 1;
 	}
 }
 
@@ -554,6 +565,18 @@ function checkObjectives() {
 
 	checkWarchiefAlive();
 
+	// Defeat if the player loses too many tiles
+	if(state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId)) {
+		sometimesPrint("Player triggered possible end game to spirits.");
+		state.objectives.setCurrentVal(SPIRIT_DATA.tilesLostRemainingObjId, LOST_ZONES.length - SPIRIT_DATA.tooManyTilesTakenThreshold);
+		if(LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold + SPIRIT_DATA.tilesLostRemaining) {
+			msg("Game lost to spirits claiming tiles");
+			state.objectives.setStatus(SPIRIT_DATA.tilesLostRemainingObjId, OStatus.Missed);
+			pauseAndShowDialog(DIALOG.ghosts_take_too_many_tiles);
+			customDefeat("The spirits have claimed the island.");
+		}
+	}
+
 	if(SHIP_DATA.shipUnitsCallbackPressed) {
 
 		// Only reveal the island after sending the first boat of units
@@ -581,6 +604,7 @@ function checkObjectives() {
 		}
 	}
 
+	// The three endings all have their own multi-objective quest line that is tracked separately.
 	switch(currentEnding) {
 		case ENDING_BAD: manageBadEndingObjectives();
 	}
@@ -734,16 +758,20 @@ function checkDialog() {
 		DIALOG.spirit_appears = [];
 	}
 
-	if(DIALOG.ghosts_take_first_tile.length > 0 && LOST_ZONES.length >= 1) {
+	if(SPIRIT_DATA.firstTileTaken && LOST_ZONES.length >= 1) {
 		msg("Spirits took first tile dialog shown");
+		var zone = getZone(LOST_ZONES[0]);
+		moveCamera({x:zone.x, y:zone.y});
 		pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
 		DIALOG.ghosts_take_first_tile = [];
+		SPIRIT_DATA.firstTileTaken = false;
 	}
 
-	if(DIALOG.ghosts_take_many_tiles.length > 0 && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
-		msg("Spirits took first tile dialog shown");
-		pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
-		DIALOG.ghosts_take_first_tile = [];
+	if(!state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId) && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
+		msg("Spirit defeat countdown triggered");
+		pauseAndShowDialog(DIALOG.ghosts_take_many_tiles);
+		DIALOG.ghosts_take_many_tiles = [];
+		state.objectives.setVisible(SPIRIT_DATA.tilesLostRemainingObjId, true);
 	}
 }
 
@@ -944,6 +972,7 @@ function ghostsTakeZone(zone:Zone) {
 	human.coverZone(zone);
 	zone.allowScouting = false;
 	INVASION_ZONES.remove(zone.id);
+	LOST_ZONES.push(zone.id);
 
 	// Add all neighbor zones as targets for invasion.
 	for(z in zone.next) {
@@ -964,17 +993,15 @@ function prepareNewAttacks() {
 
 		var delta = state.time - SPIRIT_DATA.timeofLastAttackSent;
 		delta = delta < 0 ? 0 : delta; // If the player rushes the second objective before Y2, this can be negative.
-		var proba = delta / 24000.0; // normalize the distribution over 240 seconds.
+		var proba = delta / SPIRIT_DATA.spawnFactor; // normalize the distribution over 240 seconds.
 		var prevAttackTime = SPIRIT_DATA.deltaOnPreviousAttack;
-
-		sometimesPrint("PROBABILITY: " + proba);
 
 		// we apply a slight linear shift in the probability of an attack to make back-to-back slightly less likely, and longer than the threshold slightly more likely
 		if(SPIRIT_DATA.deltaOnPreviousAttack >= 0) {
 			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.8 : proba * 1.1;
 		}
 
-		sometimesPrint("PROBABILITY: " + proba + " RANDOM: " + random());
+		rarelyPrint("PROBABILITY: " + proba + " RANDOM: " + random());
 
 		if(random() < proba){
 			var min = toInt(SPIRIT_DATA.spiritMin + (SPIRIT_DATA.spiritMinGrowth * currentYear));
@@ -999,7 +1026,7 @@ function prepareNewAttacks() {
 		}
 	}
 	else {
-		sometimesPrint("Not ready to send attacks");
+		rarelyPrint("Not ready to send attacks");
 	}
 }
 
