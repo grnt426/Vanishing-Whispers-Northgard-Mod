@@ -13,11 +13,13 @@
  */
 var human:Player;
 
+var VERSION = 1.1;
+
 DEBUG = {
-	SKIP_STUDYING: false,
-	MESSAGES: true,
+	SKIP_STUDYING: true,
+	MESSAGES: false,
 	SPIRITS_FAST: true,
-	BAD:false, // setup debug for bad ending
+	BAD:true, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
 
@@ -38,10 +40,11 @@ var STARTER_CARVED_STONE_TILE_ID: Int = 76;
  * 66 - Farm west of start
  * 60 - Forest, east of start
  * 53 - Kobold home tile
+ * 74 - Jotunn camp
  *
  * All other zones are capturable by the spirits, and once captured, lost forever.
  */
-var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53];
+var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, 74];
 
 /**
  * These zones are where the spirits will launch their attacks. Once captured,
@@ -68,9 +71,8 @@ var INVASION_ZONES = [30, 63, 80, 84, 85, 87, 90];
  * 45 - Southern circle of stones
  * 50 - empty plain, leading to port
  * 72 - Graveyard
- * 74 - Jotunn camp
  */
-var INVASION_SECOND_STARTING_WAVE_ZONES = [25, 37, 38, 41, 45, 50, 72, 74];
+var INVASION_SECOND_STARTING_WAVE_ZONES = [25, 37, 38, 41, 45, 50, 72];
 
 /**
  * These zones have been taken by the spirits and are lost.
@@ -101,13 +103,14 @@ var SHIP_DATA = {
 	resources:[{res:Resource.Wood, amt:150}, {res:Resource.Money, amt:75}],
 	callback:"shipUnitsCallback",
 	shipUnitsCallbackPressed:false,
+	firstSend: true,
 };
 
 var SPIRIT_DATA = {
 	spiritMin:2, // Minimum number of spirits to send in a single attack
 	spiritMax:4, // Maximum number of spirits to send in a single attack
-	spiritMinGrowth:0.75, // How quickly the minimal attack size grows each year
-	spiritMaxGrowth:1.25, // How quickly the maximum attack size grows each year
+	spiritMinGrowth:0.4, // How quickly the minimal attack size grows each year
+	spiritMaxGrowth:.6, // How quickly the maximum attack size grows each year
 
 	/**
 	 * Maximum number of attacks that can occur at once.
@@ -331,8 +334,8 @@ var stoneCircleStudying = {
 	studied:false,
 	studiersRequired:3,
 	zoneIds:LORE_CIRCLE_ZONE_IDS,
-	startDialog:DIALOG.graveyard_study_start,
-	finishDialog:DIALOG.graveyard_study_finish,
+	startDialog:DIALOG.stone_circle_start,
+	finishDialog:DIALOG.stone_circle_finish,
 	setupFinished:true,
 }
 
@@ -358,6 +361,12 @@ function init() {
 
 function onFirstLaunch() {
 
+	state.removeVictory(VictoryKind.VMoney);
+    state.removeVictory(VictoryKind.VFame);
+    state.removeVictory(VictoryKind.VLore);
+
+	debug("Map Version: " + VERSION);
+
 	// Disabled events. We shall send our own >:)
 	noEvent();
 
@@ -368,18 +377,19 @@ function onFirstLaunch() {
 	var hall = human.getTownHall();
 	summonWarchief(human, getZone(START_ZONE_ID), hall.x + 7, hall.y + 7);
 
-	human.addResource(Resource.Wood, 1000);
-	human.addResource(Resource.Money, 1000);
-
 	msg("setting up obj");
 	setupObjectives();
-	human.coverZone(getZone(MYSTERY_ZONE_ID));
+	human.addResource(Resource.Food, 150);
+	human.addResource(Resource.Wood, 150);
+	human.addResource(Resource.Money, 75);
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
+		human.addResource(Resource.Wood, 1000);
+		human.addResource(Resource.Money, 1000);
 		var z = getZone(PORT_ZONE_ID);
 		human.discoverZone(z); // TODO FOR TESTING
-		human.discoverZone(getZone(MYSTERY_ZONE_ID));
+		// human.discoverZone(getZone(MYSTERY_ZONE_ID));
 		human.discoverZone(getZone(57));
 		human.discoverZone(getZone(50));
 		killAllUnits([z, getZone(57), getZone(50)]);
@@ -473,6 +483,16 @@ function checkObjectives() {
 	}
 
 	if(SHIP_DATA.shipUnitsCallbackPressed) {
+
+		// Only reveal the island after sending the first boat of units
+		if(SHIP_DATA.firstSend){
+			SHIP_DATA.firstSend = false;
+			human.takeControl(getZone(MYSTERY_ZONE_ID));
+			human.discoverZone(getZone(MYSTERY_ZONE_ID));
+
+			// TODO: trigger some dialog on being discovered?
+		}
+
 		SHIP_DATA.shipUnitsCallbackPressed = false;
 		if(meetsRequirements(SHIP_DATA.resources) && getZone(PORT_ZONE_ID).units.length > 0) {
 			takeResources(SHIP_DATA.resources);
@@ -484,7 +504,7 @@ function checkObjectives() {
 				types.push(u.kind);
 				u.die(true, false);
 			}
-			human.discoverZone(getZone(MYSTERY_ZONE_ID));
+
 			drakkar(human, getZone(MYSTERY_ZONE_ID), getZone(PORT_LAUNCH_ZONE_ID), 0, 0, types, .1);
 		}
 	}
@@ -785,6 +805,7 @@ function manageCurrentAttacks() {
 		// otherwise we lose progress; the ghosts are being attacked! :O
 		else{
 			attack.captureProgress -= 1;
+			attack.captureProgress = attack.captureProgress < 0 ? 0 : attack.captureProgress;
 			var attackObj = getAttackObjective(attack.objIndex);
 			state.objectives.setCurrentVal(attackObj.id, toInt(attack.captureProgress / SPIRIT_DATA.timeToCaptureSeconds * 100));
 		}
@@ -828,7 +849,7 @@ function prepareNewAttacks() {
 
 		var delta = state.time - SPIRIT_DATA.timeofLastAttackSent;
 		delta = delta < 0 ? 0 : delta; // If the player rushes the second objective before Y2, this can be negative.
-		var proba = delta / 12000.0; // normalize the distribution over 240 seconds.
+		var proba = delta / 24000.0; // normalize the distribution over 240 seconds.
 		var prevAttackTime = SPIRIT_DATA.deltaOnPreviousAttack;
 
 		sometimesPrint("PROBABILITY: " + proba);
@@ -843,6 +864,7 @@ function prepareNewAttacks() {
 		if(random() < proba){
 			var min = toInt(SPIRIT_DATA.spiritMin + (SPIRIT_DATA.spiritMinGrowth * currentYear));
 			var max = toInt(SPIRIT_DATA.spiritMax + (SPIRIT_DATA.spiritMaxGrowth * currentYear));
+			SPIRIT_DATA.deltaOnPreviousAttack = toInt(delta);
 
 			// We add one as randomInt works 0 inclusively to max exclusively
 			var spirits = randomInt((max - min) + 1) + min;
@@ -883,8 +905,10 @@ function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
 	var prepare = getPreparedObjective(index);
 	state.objectives.setCurrentVal(prepare.id, 0);
 	state.objectives.setVisible(prepare.id, true);
+	state.objectives.setStatus(prepare.id, OStatus.Empty);
 	var attack = getAttackObjective(index);
 	state.objectives.setCurrentVal(attack.id, 0);
+	state.objectives.setStatus(attack.id, OStatus.Empty);
 
 	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, preparedTime:state.time, objIndex:index, attackedYet:false});
 }
