@@ -13,11 +13,11 @@
  */
 var human:Player;
 
-var VERSION = "1.2";
+var VERSION = "1.3";
 
 DEBUG = {
 	SKIP_STUDYING: false,
-	MESSAGES: true,
+	MESSAGES: false,
 	SPIRITS_FAST: false,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
@@ -101,6 +101,11 @@ var SACRIFICE_UNITS_OBJ_ID = "SacrificeUnits";
 var currentEnding = ENDING_BAD; // This is the current ending the player will get after studying the stones on the mystery island
 var endingObjectiveShown:Bool = false;
 
+var NORTH_ID = "nId";
+var EAST_ID = "eId";
+var SOUTH_ID = "sId";
+var WEST_ID = "wId";
+
 var SHIP_DATA = {
 	objId: "shipunits",
 	objName: "Ship units: 150 Wood, 75 Krowns",
@@ -146,13 +151,13 @@ var SPIRIT_DATA = {
 
 	timeToSecondWaveInvasionZones:60 * 12 * 3, // After 3 years we add in the second invasion waves candidate zones.
 
-	spawnFactor:24000.0, // Used to reduce the spawn rate
+	spawnFactor:5000.0, // Used to reduce the spawn rate
 
 	// The current ongoing attacks
 	attackData:[
 
 		// We need something here so Haxe knows what the type is.
-		{zone:getZone(START_ZONE_ID), captureProgress:0.0, spiritCount:0, attackTime:0.0, preparedTime:0.0, objIndex:-1, attackedYet:true},
+		{zone:getZone(START_ZONE_ID), captureProgress:0.0, spiritCount:0, attackTime:0.0, preparedTime:0.0, objIndex:-1, attackedYet:true, dir:NORTH_ID},
 	],
 
 	preparedAttackObjs:[
@@ -163,10 +168,6 @@ var SPIRIT_DATA = {
 
 	objectivesUsed:[],
 
-	northId:"nId",
-	eastId:"eId",
-	southId:"sId",
-	westId:"wId",
 
 	/**
 	 * Triggers dialog once the first tile is taken.
@@ -183,6 +184,13 @@ var SPIRIT_DATA = {
 	 */
 	tilesLostRemaining:3,
 	tilesLostRemainingObjId:"tilesLostId",
+
+	zonesDirections: [
+		{dir:NORTH_ID, zones:[57, 63, 50, 46, 39, 37, 42, 51]},
+		{dir:EAST_ID, zones:[25, 30, 38, 41, 48, 45]},
+		{dir:SOUTH_ID, zones:[70, 72, 80, 85]},
+		{dir:WEST_ID, zones:[84, 76, 82, 90, 87]},
+	],
 };
 
 var KOBOLD_DATA = {
@@ -486,13 +494,13 @@ function onFirstLaunch() {
 
 	// Really amps up the attacks for testing
 	if(DEBUG.SPIRITS_FAST) {
-		SPIRIT_DATA.timeToFirstAttackSeconds = 30;
+		SPIRIT_DATA.timeToFirstAttackSeconds = 20;
 		human.discoverAll();
 		SPIRIT_DATA.timeofLastAttackSent = 10.0;
 		SPIRIT_DATA.warningBetweenAttacksSeconds = 10;
 		SPIRIT_DATA.warningBetweenAttacksMinimum = 10;
 		SPIRIT_DATA.maxSimultaneousAttacks = 4;
-		SPIRIT_DATA.spawnFactor = 1;
+		SPIRIT_DATA.spawnFactor = 1000;
 	}
 }
 
@@ -567,7 +575,7 @@ function checkObjectives() {
 
 	// Defeat if the player loses too many tiles
 	if(state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId)) {
-		sometimesPrint("Player triggered possible end game to spirits.");
+		rarelyPrint("Player triggered possible end game to spirits.");
 		state.objectives.setCurrentVal(SPIRIT_DATA.tilesLostRemainingObjId, LOST_ZONES.length - SPIRIT_DATA.tooManyTilesTakenThreshold);
 		if(LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold + SPIRIT_DATA.tilesLostRemaining) {
 			msg("Game lost to spirits claiming tiles");
@@ -907,6 +915,8 @@ function launchPreparedAttacks() {
 		}
 		else{
 			var prep = getPreparedObjective(attack.objIndex);
+
+			// The weird math below: normalizes the time to launch to be a percent between 0 and 100, which is much nicer and less confusing than a count-up to the exact time in seconds
 			state.objectives.setCurrentVal(prep.id, toInt(((attack.attackTime - attack.preparedTime) - (attack.attackTime - state.time) / (attack.attackTime - attack.preparedTime) * 100)));
 		}
 	}
@@ -961,6 +971,30 @@ function manageCurrentAttacks() {
 		state.objectives.setVisible(attack.id, false);
 		SPIRIT_DATA.objectivesUsed.remove(f.objIndex);
 	}
+
+	// Now that we have updated the list of remaining attacks, we can check which cardinal directions are being attack/prepared
+	var dirs = [];
+	var notUsed = [NORTH_ID, EAST_ID, SOUTH_ID, WEST_ID];
+	for(a in SPIRIT_DATA.attackData) {
+		var d = notUsed.indexOf(a.dir);
+		if(d != -1) {
+			notUsed.remove(a.dir);
+			dirs.push(a.dir);
+		}
+	}
+
+	/**
+	 * The reason we break up the below into two calls is because we can't just setVisible multiple times
+	 * under a single call of regularUpdate. It only takes the first use, so we need to make sure we correctly set visibility
+	 * exactly once.
+	 */
+	for(d in dirs) {
+		state.objectives.setVisible(d, true);
+	}
+
+	for(d in notUsed) {
+		state.objectives.setVisible(d, false);
+	}
 }
 
 /**
@@ -998,7 +1032,7 @@ function prepareNewAttacks() {
 
 		// we apply a slight linear shift in the probability of an attack to make back-to-back slightly less likely, and longer than the threshold slightly more likely
 		if(SPIRIT_DATA.deltaOnPreviousAttack >= 0) {
-			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.8 : proba * 1.1;
+			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.1 : proba * 1.1;
 		}
 
 		rarelyPrint("PROBABILITY: " + proba + " RANDOM: " + random());
@@ -1054,8 +1088,18 @@ function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
 	var attack = getAttackObjective(index);
 	state.objectives.setCurrentVal(attack.id, 0);
 	state.objectives.setStatus(attack.id, OStatus.Empty);
+	var dir = determineCardinality(zone.id);
 
-	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, preparedTime:state.time, objIndex:index, attackedYet:false});
+	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, preparedTime:state.time, objIndex:index, attackedYet:false, dir:dir});
+}
+
+function determineCardinality(z:Int): String {
+	for(c in SPIRIT_DATA.zonesDirections) {
+		if(c.zones.indexOf(z) != -1)
+			return c.dir;
+	}
+
+	debug("Invalid zone for spawning, no known direction???");
 }
 
 function getAttackObjective(index:Int):{id:String, name:String} {
@@ -1222,10 +1266,10 @@ function setupObjectives() {
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
 	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:false}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
 
-	state.objectives.add(SPIRIT_DATA.northId, "Attack In the North", {visible:false});
-	state.objectives.add(SPIRIT_DATA.eastId, "Attack In the East", {visible:false});
-	state.objectives.add(SPIRIT_DATA.southId, "Attack In the South", {visible:false});
-	state.objectives.add(SPIRIT_DATA.westId, "Attack In the West", {visible:false});
+	state.objectives.add(NORTH_ID, "Attack In the North", {visible:false});
+	state.objectives.add(EAST_ID, "Attack In the East", {visible:false});
+	state.objectives.add(SOUTH_ID, "Attack In the South", {visible:false});
+	state.objectives.add(WEST_ID, "Attack In the West", {visible:false});
 
 	// There could feasibly be this many attacks at once, though I imagine at this point a player would lose....
 	var i = 0;
