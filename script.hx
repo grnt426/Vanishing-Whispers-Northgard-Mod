@@ -16,9 +16,12 @@ var human:Player;
 DEBUG = {
 	SKIP_STUDYING: false,
 	MESSAGES: true,
+	SPIRITS_FAST: true,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
+
+	TIME_INDEX:0,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -50,7 +53,7 @@ var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53];
  * 84 - farm south-west of start
  * 85 - Southern most tile
  * 87 - Geyser, east
- * 90 - Wolf den, east
+ * 90 - Wolf den, west
 
  */
 var INVASION_ZONES = [30, 63, 80, 84, 85, 87, 90];
@@ -140,8 +143,21 @@ var SPIRIT_DATA = {
 	attackData:[
 
 		// We need something here so Haxe knows what the type is.
-		{zone:getZone(START_ZONE_ID), captureProgress:0.0, spiritCount:0, attackTime:0.0, objId:null, attackedYet:true},
+		{zone:getZone(START_ZONE_ID), captureProgress:0.0, spiritCount:0, attackTime:0.0, preparedTime:0.0, objIndex:-1, attackedYet:true},
 	],
+
+	preparedAttackObjs:[
+	],
+
+	captureZoneObjs:[
+	],
+
+	objectivesUsed:[],
+
+	northId:"nId",
+	eastId:"eId",
+	southId:"sId",
+	westId:"wId",
 };
 
 var KOBOLD_DATA = {
@@ -357,7 +373,7 @@ function onFirstLaunch() {
 
 	msg("setting up obj");
 	setupObjectives();
-	// human.coverZone(getZone(MYSTERY_ZONE_ID));
+	human.coverZone(getZone(MYSTERY_ZONE_ID));
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
@@ -379,12 +395,23 @@ function onFirstLaunch() {
 
 	// Clean up type data placeholders
 	SPIRIT_DATA.attackData.pop();
+
+	if(DEBUG.SPIRITS_FAST) {
+		SPIRIT_DATA.timeToFirstAttackSeconds = 30;
+		human.discoverAll();
+		SPIRIT_DATA.timeofLastAttackSent = 10.0;
+		SPIRIT_DATA.warningBetweenAttacksSeconds = 10;
+		SPIRIT_DATA.maxSimultaneousAttacks = 4;
+	}
 }
 
 /**
  * Required function, called automatically by the game engine.
  */
 function regularUpdate(dt : Float) {
+
+	// Used to print messages occasionally
+	DEBUG.TIME_INDEX++;
 
 	checkObjectives();
 
@@ -400,7 +427,7 @@ function regularUpdate(dt : Float) {
 
 	checkEndGame();
 
-	if(toInt(state.time) % 10 == 0)
+	if(toInt(DEBUG.TIME_INDEX) % 30 == 0)
 		msg("running...");
 }
 
@@ -708,14 +735,26 @@ function launchPreparedAttacks() {
 		if(!attack.attackedYet && attack.attackTime < state.time) {
 			addFoes([{z:attack.zone.id, u:Unit.SpecterWarrior, nb:attack.spiritCount}]);
 			attack.attackedYet = true;
+			msg("Launching attack in zone: " + attack.zone.id);
+
+			var attackObj = getAttackObjective(attack.objIndex);
+			state.objectives.setVisible(attackObj.id, true);
+			var prep = getPreparedObjective(attack.objIndex);
+			state.objectives.setVisible(prep.id, false);
+		}
+		else{
+			var prep = getPreparedObjective(attack.objIndex);
+			state.objectives.setCurrentVal(prep.id, toInt(((attack.attackTime - attack.preparedTime) - (attack.attackTime - state.time) / (attack.attackTime - attack.preparedTime) * 100)));
 		}
 	}
 }
 
 function manageCurrentAttacks() {
-	var failedAttacks = [];
+	var removeAttacks = [];
 	var uncontestedAttacks = [];
 	for(attack in SPIRIT_DATA.attackData) {
+		if(!attack.attackedYet)
+			continue;
 		var units = attack.zone.units;
 		var ghosts = 0;
 		var playerUnits = 0;
@@ -728,26 +767,35 @@ function manageCurrentAttacks() {
 
 		// If all ghosts are dead, this attack ends and will be cleaned up
 		if(ghosts == 0){
-			failedAttacks.push(attack);
+			removeAttacks.push(attack);
 		}
 
 		// If no player units are present, then the ghosts earn progress towards capturing
 		else if(playerUnits == 0) {
 			attack.captureProgress += 0.5;
+			var attackObj = getAttackObjective(attack.objIndex);
+			state.objectives.setCurrentVal(attackObj.id, toInt(attack.captureProgress / SPIRIT_DATA.timeToCaptureSeconds * 100));
+
 			if(attack.captureProgress >= SPIRIT_DATA.timeToCaptureSeconds) {
 				ghostsTakeZone(attack.zone);
+				removeAttacks.push(attack);
 			}
 		}
 
 		// otherwise we lose progress; the ghosts are being attacked! :O
 		else{
-			attack.captureProgress = 0;
+			attack.captureProgress -= 1;
+			var attackObj = getAttackObjective(attack.objIndex);
+			state.objectives.setCurrentVal(attackObj.id, toInt(attack.captureProgress / SPIRIT_DATA.timeToCaptureSeconds * 100));
 		}
 	}
 
 	// we couldn't do this in the previous loop as we would be modifying an array while iterating over it.
-	for(f in failedAttacks) {
+	for(f in removeAttacks) {
 		SPIRIT_DATA.attackData.remove(f);
+		var attack = getAttackObjective(f.objIndex);
+		state.objectives.setVisible(attack.id, false);
+		SPIRIT_DATA.objectivesUsed.remove(f.objIndex);
 	}
 }
 
@@ -769,22 +817,30 @@ function ghostsTakeZone(zone:Zone) {
 }
 
 function prepareNewAttacks() {
+	var currentYear = timeToYears(state.time);
+
 	// Attacks will only start under these two conditions.
 	// This is to: help players who are new and need the extra time so they get the full year before the first attack wave
 	// For experienced players, this helps to slow them down if they rush objectives.
 	if(graveYardStudying.studied || state.time > SPIRIT_DATA.timeToFirstAttackSeconds) {
-		var delta = state.time - 660; // TODO SPIRIT_DATA.timeOfLastAttackSent
+		if(SPIRIT_DATA.attackData.length >= toInt(SPIRIT_DATA.maxSimultaneousAttacks + (SPIRIT_DATA.maxSimultaneousAttacksGrowth * currentYear)))
+			return;
+
+		var delta = state.time - SPIRIT_DATA.timeofLastAttackSent;
 		delta = delta < 0 ? 0 : delta; // If the player rushes the second objective before Y2, this can be negative.
-		var proba = delta / 240.0; // normalize the distribution over 240 seconds.
+		var proba = delta / 3200.0; // normalize the distribution over 240 seconds.
 		var prevAttackTime = SPIRIT_DATA.deltaOnPreviousAttack;
-		var currentYear = timeToYears(state.time);
+
+		sometimesPrint("PROBABILITY: " + proba);
 
 		// we apply a slight linear shift in the probability of an attack to make back-to-back slightly less likely, and longer than the threshold slightly more likely
 		if(SPIRIT_DATA.deltaOnPreviousAttack >= 0) {
 			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.8 : proba * 1.1;
 		}
 
-		if(proba < random()){
+		sometimesPrint("PROBABILITY: " + proba + " RANDOM: " + random());
+
+		if(random() < proba){
 			var min = toInt(SPIRIT_DATA.spiritMin + (SPIRIT_DATA.spiritMinGrowth * currentYear));
 			var max = toInt(SPIRIT_DATA.spiritMax + (SPIRIT_DATA.spiritMaxGrowth * currentYear));
 
@@ -802,12 +858,43 @@ function prepareNewAttacks() {
 			warning = warning < SPIRIT_DATA.warningBetweenAttacksMinimum ? SPIRIT_DATA.warningBetweenAttacksMinimum : warning;
 
 			populateAttackData(getZone(zoneId), spirits, warning + state.time);
+			SPIRIT_DATA.timeofLastAttackSent = state.time;
 		}
+	}
+	else {
+		sometimesPrint("Not ready to send attacks");
 	}
 }
 
 function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
-	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, objId:null, attackedYet:false});
+
+	// find an unused objective
+	var index = 0;
+	for(i in 0...10) {
+		if(SPIRIT_DATA.objectivesUsed.indexOf(i) == -1){
+			SPIRIT_DATA.objectivesUsed.push(i);
+			index = i;
+			break;
+		}
+	}
+
+	// prepare the objectives that will represent this attack.
+	msg("Setting up attack in" + zone.id + ", Count: " + spiritCount + " at " + attackTime + " INDEX: " + index);
+	var prepare = getPreparedObjective(index);
+	state.objectives.setCurrentVal(prepare.id, 0);
+	state.objectives.setVisible(prepare.id, true);
+	var attack = getAttackObjective(index);
+	state.objectives.setCurrentVal(attack.id, 0);
+
+	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, preparedTime:state.time, objIndex:index, attackedYet:false});
+}
+
+function getAttackObjective(index:Int):{id:String, name:String} {
+	return SPIRIT_DATA.captureZoneObjs[index];
+}
+
+function getPreparedObjective(index:Int):{id:String, name:String} {
+	return SPIRIT_DATA.preparedAttackObjs[index];
 }
 
 /**
@@ -933,6 +1020,16 @@ function msg(m:String) {
 		debug(m);
 }
 
+function sometimesPrint(m:String) {
+	if(toInt(DEBUG.TIME_INDEX) % 3 == 0)
+		msg(m);
+}
+
+function rarelyPrint(m:String) {
+	if(toInt(DEBUG.TIME_INDEX) % 7 == 0)
+		msg(m);
+}
+
 /**
  * Objectives show up on the screen in the order they were added, so the ordering below
  * is somewhat odd, but is meant to help ensure the most primary focus is near the top.
@@ -952,4 +1049,19 @@ function setupObjectives() {
 	// Misc objectivs, or actionable buttons for objectives
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
 	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:false}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
+
+	state.objectives.add(SPIRIT_DATA.northId, "Attack In the North", {visible:false});
+	state.objectives.add(SPIRIT_DATA.eastId, "Attack In the East", {visible:false});
+	state.objectives.add(SPIRIT_DATA.southId, "Attack In the South", {visible:false});
+	state.objectives.add(SPIRIT_DATA.westId, "Attack In the West", {visible:false});
+
+	// There could feasibly be this many attacks at once, though I imagine at this point a player would lose....
+	for(i in 0...10) {
+		var obj = {id:i+"prepId", name:"Spirits are Preparing..."};
+		SPIRIT_DATA.preparedAttackObjs.push(obj);
+		state.objectives.add(obj.id, obj.name, {visible:false, showProgressBar:true, goalVal:100});
+		obj = {id:i+"capId", name:"Capturing Zone"};
+		SPIRIT_DATA.captureZoneObjs.push(obj);
+		state.objectives.add(obj.id, obj.name, {visible:false, showProgressBar:true, goalVal:100});
+	}
 }
