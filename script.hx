@@ -828,7 +828,7 @@ function prepareNewAttacks() {
 
 		var delta = state.time - SPIRIT_DATA.timeofLastAttackSent;
 		delta = delta < 0 ? 0 : delta; // If the player rushes the second objective before Y2, this can be negative.
-		var proba = delta / 3200.0; // normalize the distribution over 240 seconds.
+		var proba = delta / 12000.0; // normalize the distribution over 240 seconds.
 		var prevAttackTime = SPIRIT_DATA.deltaOnPreviousAttack;
 
 		sometimesPrint("PROBABILITY: " + proba);
