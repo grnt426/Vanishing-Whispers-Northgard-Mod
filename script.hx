@@ -22,10 +22,12 @@ DEBUG = {
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
-
-	ALL_EXPLORED:true,
+	ALL_EXPLORED:false,
 
 	TIME_INDEX:0,
+
+	QUICK_BUTTON:true,
+	QUICK_BUTTON_INDEX:0,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -1248,6 +1250,11 @@ function rarelyPrint(m:String) {
  * is somewhat odd, but is meant to help ensure the most primary focus is near the top.
  */
 function setupObjectives() {
+
+	if(DEBUG.QUICK_BUTTON) {
+		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
+	}
+
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
 
 	state.objectives.add(SPIRIT_DATA.tilesLostRemainingObjId, "Don't lose more territory to the ghosts", {visible:false, showProgressBar:true, goalVal:SPIRIT_DATA.tilesLostRemaining});
@@ -1260,7 +1267,8 @@ function setupObjectives() {
 	// Good, Neutral, Bad secondary objectives
 	state.objectives.add(BAD_ENDING_DATA.escapeObjId, BAD_ENDING_DATA.escapeObjName, {visible:false});
 
-	state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
+	// TODO: should this be here?
+	// state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
 
 	// Misc objectivs, or actionable buttons for objectives
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
@@ -1282,4 +1290,22 @@ function setupObjectives() {
 		state.objectives.add(obj.id, obj.name, {visible:false, showProgressBar:true, goalVal:100});
 		i++;
 	}
+}
+
+/**
+ * DEBUG FUNCTION
+ *
+ * Used for quickly "completing" a step of an objective to see if completing
+ * and transitioning between objectives works correctly.
+ */
+function quickButtonCallback() {
+	switch(DEBUG.QUICK_BUTTON_INDEX) {
+		case 0: human.discoverZone(getZone(STARTER_CARVED_STONE_TILE_ID)); debug("Starter stone revealed");
+		case 1: starterStone.studiedTime = starterStone.studyTimeRequired; debug("Studying of starting stone complete");
+		case 2: human.discoverZone(getZone(GRAVEYARD_ZONE_ID)); debug("graveyard explored");
+		case 3: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("graveyard explored");
+		default:debug("No more next steps");
+	}
+
+	DEBUG.QUICK_BUTTON_INDEX++;
 }
