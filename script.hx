@@ -92,7 +92,7 @@ var DIALOG_SUPPRESS_ID = "dialogsuppressid";
 var DIALOG_SUPPRESSED:Bool = false; // The player can choose to skip the dialog in the opening. This makes replays less annoying
 var DIALOG_SUPPRESSED_TIMEOUT:Int = 60;
 
-var TIME_TO_OPENING_DIALOG:Int = 15;
+var TIME_TO_OPENING_DIALOG:Int = 7;
 
 var ENDING_NEUTRAL = "neutral";
 var ENDING_GOOD = "good";
@@ -107,6 +107,12 @@ var NORTH_ID = "nId";
 var EAST_ID = "eId";
 var SOUTH_ID = "sId";
 var WEST_ID = "wId";
+
+var FIND_STARTING_STONE_ID = "findstartingstone";
+var FIND_GRAVEYARD_ID = "findgraveyard";
+var FIND_STONE_CIRCLES_ID = "findstonecircles";
+var FIND_PORT_SITE_ID = "findportsite";
+var BUILD_PORT_SEND_SHIP_ID = "buildportsendship";
 
 var SHIP_DATA = {
 	objId: "shipunits",
@@ -241,7 +247,7 @@ var DIALOG = {
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We have setup camp here on the center of the island. I can't wait to discover what is so mysterious here."},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"We have very little to go on. All we know is most ships can't even land before the fog gets too dense."},
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Yes, that fog and wind nearly blew us off course. Barely managed to keep the ship going straight."},
-		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Let's start expanding and see what we can discover..."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Let's start expanding, we need to find a lore stone to get started."},
 	],
 
 	initial_explore:[
@@ -250,16 +256,20 @@ var DIALOG = {
 	],
 
 	spirit_appears:[
-		{option:{who:Banner.Giant1, name:"Restless Spirits"}, text:"YoU daRE to DIstuRb ANDER DRAGE Island? YoU were wArDED awaY, yeT HErE yoU ArE."},
-		{option:{who:Banner.Giant1, name:"Restless Spirits"}, text:"Go bAck. NevER retUrn...."},
-		{option:{who:Banner.Giant1, name:"Restless Spirits"}, text:"it aWakENs......"},
-		{option:{who:Banner.Giant1, name:"Restless Spirits"}, text:"BEGONE!"},
+		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"YoU daRE to DIstuRb ANDER DRAGE Island? YoU were wArDED awaY, yeT HErE yoU ArE."},
+		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"Go bAck. NevER retUrn...."},
+		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"it aWakENs......"},
+		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"BEGONE!"},
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The spirits, their energy is changing. It is bubbling and churning. I fear the island's spiritual world is trying to merge with ours!"},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Then we need to quickly figure out this mystery. I don't think that will be the last of the spirits we see."},
 	],
 
 	starter_stone:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Hmm, this Lore Stone is unlike others I have seen. We should study it more."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This Lore Stone is unlike others I have seen. We should keep one Loremaster on this stone."},
+	],
+
+	found_lore_stone:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"That lore stone is a good first start. With it we might be able to discover where to look first."},
 	],
 
 	starter_stone_studied:[
@@ -268,8 +278,12 @@ var DIALOG = {
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"We should investigate the South first, there might be more there to learn."},
 	],
 
+	found_grave_yard:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This must be the burial site. I can't tell which clan this belonged to, however."},
+	],
+
 	graveyard_study_start:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This graveyard site is a gold mine of knowledge! If only we could spend more time digging."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This graveyard has remains from all the clans. If only we could spend more time digging."},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"No time, it looks like the spirits have noticed out presence here, and they don't like it. Assign two Loremasters quickly."},
 	],
 
@@ -293,7 +307,7 @@ var DIALOG = {
 	],
 
 	arrive_at_island:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Amazing! There were dragonkin on this island. But why? And how did they have access to such powerful runes?"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Amazing! There were ancient dragonkin on this island. But why? And how did they have access to such powerful runes?"},
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We will need to immediately study these stones. Hopefully we have enough villagers to spare to research quickly."},
 	],
 
@@ -398,6 +412,7 @@ var starterStone = {
 	startDialog:DIALOG.starter_stone,
 	finishDialog:DIALOG.starter_stone_studied,
 	setupFinished:true,
+	findNextObjectiveId:FIND_GRAVEYARD_ID,
 }
 
 var graveYardStudying = {
@@ -410,6 +425,7 @@ var graveYardStudying = {
 	startDialog:DIALOG.graveyard_study_start,
 	finishDialog:DIALOG.graveyard_study_finish,
 	setupFinished:true,
+	findNextObjectiveId:FIND_STONE_CIRCLES_ID,
 }
 
 var stoneCircleStudying = {
@@ -422,6 +438,7 @@ var stoneCircleStudying = {
 	startDialog:DIALOG.stone_circle_start,
 	finishDialog:DIALOG.stone_circle_finish,
 	setupFinished:true,
+	findNextObjectiveId:BUILD_PORT_SEND_SHIP_ID,
 }
 
 var islandStudying = {
@@ -434,6 +451,7 @@ var islandStudying = {
 	startDialog:DIALOG.arrive_at_island,
 	finishDialog:DIALOG.island_finish_placeholder,
 	setupFinished:false,
+	findNextObjectiveId:null,
 }
 
 /**
@@ -563,6 +581,20 @@ function checkGiants() {
  */
 function checkObjectives() {
 
+	if(state.objectives.getStatus(FIND_STARTING_STONE_ID) != OStatus.Done && human.hasDiscovered(getZone(STARTER_CARVED_STONE_TILE_ID))){
+		msg("Found lore stone");
+		state.objectives.setStatus(FIND_STARTING_STONE_ID, OStatus.Done);
+		sendCameraToBuilding(findBuildingInZone(STARTER_CARVED_STONE_TILE_ID, Building.CarvedStone));
+		pauseAndShowDialog(DIALOG.found_lore_stone);
+	}
+
+	if(state.objectives.getStatus(FIND_GRAVEYARD_ID) != OStatus.Done && human.hasDiscovered(getZone(GRAVEYARD_ZONE_ID))){
+		msg("Found graveyard stone");
+		state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
+		sendCameraToZone(GRAVEYARD_ZONE_ID);
+		pauseAndShowDialog(DIALOG.found_grave_yard);
+	}
+
 	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
 		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
 	}
@@ -618,6 +650,27 @@ function checkObjectives() {
 	switch(currentEnding) {
 		case ENDING_BAD: manageBadEndingObjectives();
 	}
+}
+
+function findBuildingInZone(id:Int, type:BuildingKind) {
+	var z = getZone(id);
+	for(b in z.buildings) {
+		if(b.kind == type) {
+			return b;
+		}
+	}
+
+	return null;
+}
+
+function sendCameraToZone(id:Int) {
+	var zone = getZone(id);
+	moveCamera({x:zone.x, y:zone.y});
+}
+
+function sendCameraToBuilding(building:Building) {
+	moveCamera({x:building.x, y:building.y});
+	setZoom(1);
 }
 
 /**
@@ -753,6 +806,7 @@ function checkDialog() {
 		msg("Opening dialog shown");
 		pauseAndShowDialog(DIALOG.opening);
 		DIALOG.opening = [];
+		state.objectives.setVisible(FIND_STARTING_STONE_ID, true);
 	}
 
 	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 3) {
@@ -868,14 +922,19 @@ function checkStudyingProgress(tracker) {
 			tracker.studiersRequired < units ? 0 :
 			tracker.studiersRequired == units ? 0.5 : 0.5 = (0.15 * units - tracker.studiersRequired);
 
-		if(toInt(state.time) % 3 == 0)
-			msg("Progress: " + tracker.studiedTime);
+		sometimesPrint("Progress: " + tracker.studiedTime);
 	}
 
 	// Once we finish studying we can show the dialog and finish this part of the quest
-	if(!tracker.studied && tracker.studiedTime > tracker.studyTimeRequired) {
+	if(!tracker.studied && tracker.studiedTime >= tracker.studyTimeRequired) {
 		tracker.studied = true;
 		pauseAndShowDialog(tracker.finishDialog);
+		var next = tracker.findNextObjectiveId;
+
+		// The last objective has nothing next to find and will be null
+		if(next != null) {
+			state.objectives.setVisible(next, true);
+		}
 	}
 }
 
@@ -903,6 +962,10 @@ function checkSpirits() {
 	manageCurrentAttacks();
 }
 
+/**
+ * Attacks that have been scheduled have their progress updated, and if they are ready to attack, they are
+ * sent at the zone. After preparation is complete, attacks are then handled in manageCurrentAttacks().
+ */
 function launchPreparedAttacks() {
 	for(attack in SPIRIT_DATA.attackData) {
 		if(!attack.attackedYet && attack.attackTime < state.time) {
@@ -924,6 +987,9 @@ function launchPreparedAttacks() {
 	}
 }
 
+/**
+ * Checks the capture progress of the spirits, if a wave was defeated, and stealing tiles.
+ */
 function manageCurrentAttacks() {
 	var removeAttacks = [];
 	var uncontestedAttacks = [];
@@ -1235,11 +1301,19 @@ function msg(m:String) {
 		debug(m);
 }
 
+/**
+ * When sending debug messages we sometimes want to see the progress of something, but not every update.
+ * This function is a wrapper that makes sure the provided message is only shown every 3 calls to regularUpdate.
+ */
 function sometimesPrint(m:String) {
 	if(toInt(DEBUG.TIME_INDEX) % 3 == 0)
 		msg(m);
 }
 
+/**
+ * When sending debug messages we rarely want to see the progress or status of something, but not every update.
+ * This function is a wrapper that makes sure the provided message is only shown every 7 calls to regularUpdate.
+ */
 function rarelyPrint(m:String) {
 	if(toInt(DEBUG.TIME_INDEX) % 7 == 0)
 		msg(m);
@@ -1260,6 +1334,13 @@ function setupObjectives() {
 	state.objectives.add(SPIRIT_DATA.tilesLostRemainingObjId, "Don't lose more territory to the ghosts", {visible:false, showProgressBar:true, goalVal:SPIRIT_DATA.tilesLostRemaining});
 	state.objectives.add(WARCHIEF_ALIVE_OBJ_ID, "Svarn must survive", {visible:true});
 
+	// Finding Objectives
+	state.objectives.add(FIND_STARTING_STONE_ID, "Find a lore stone", {visible:false});
+	state.objectives.add(FIND_GRAVEYARD_ID, "Find the burial site", {visible:false});
+	state.objectives.add(FIND_STONE_CIRCLES_ID, "Find the stone circles", {visible:false});
+	state.objectives.add(FIND_PORT_SITE_ID, "Find the old northern port", {visible:false});
+	state.objectives.add(BUILD_PORT_SEND_SHIP_ID, "Build a port and send a ship", {visible:false});
+
 	// Good, Neutral, Bad primary objectives
 	state.objectives.add(BAD_ENDING_DATA.objectiveId, BAD_ENDING_DATA.objectiveName, {visible:false});
 	state.objectives.add(BAD_ENDING_DATA.progressId, BAD_ENDING_DATA.progressName, {visible:false, showProgressBar:true, goalVal:BAD_ENDING_DATA.sacrificesRequred});
@@ -1268,7 +1349,7 @@ function setupObjectives() {
 	state.objectives.add(BAD_ENDING_DATA.escapeObjId, BAD_ENDING_DATA.escapeObjName, {visible:false});
 
 	// TODO: should this be here?
-	// state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
+	state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
 
 	// Misc objectivs, or actionable buttons for objectives
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
