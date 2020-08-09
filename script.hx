@@ -17,7 +17,7 @@ var VERSION = "1.3";
 
 DEBUG = {
 	SKIP_STUDYING: false,
-	MESSAGES: false,
+	MESSAGES: true,
 	SPIRITS_FAST: false,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
@@ -98,10 +98,18 @@ var ENDING_NEUTRAL = "neutral";
 var ENDING_GOOD = "good";
 var ENDING_BAD = "bad";
 
+/**
+ * There are issues with pausing/unpausing and showing dialog multiple times in a single update. The game
+ * seems to not treat the first instance as completed and will run it again. Because of this, we only show dialog
+ * once an update. Everything should be able to handle being denied one frame of missed dialog/updates.
+ */
+var dialogShownThisUpdate = false;
+
 var SACRIFICE_UNITS_OBJ_ID = "SacrificeUnits";
 
 var currentEnding = ENDING_BAD; // This is the current ending the player will get after studying the stones on the mystery island
 var endingObjectiveShown:Bool = false;
+var foundFirstStoneCirlce = false;
 
 var NORTH_ID = "nId";
 var EAST_ID = "eId";
@@ -442,7 +450,7 @@ var starterStone = {
 	// No setup required
 	setupFinished:true,
 
-	//
+	// The next thing the player needs to find as a reminder
 	findNextObjectiveId:FIND_GRAVEYARD_ID,
 }
 
@@ -560,6 +568,8 @@ function onFirstLaunch() {
  */
 function regularUpdate(dt : Float) {
 
+	dialogShownThisUpdate = false;
+
 	// Used to print messages occasionally
 	DEBUG.TIME_INDEX++;
 
@@ -613,35 +623,43 @@ function checkGiants() {
 function checkObjectives() {
 
 	if(state.objectives.getStatus(FIND_STARTING_STONE_ID) != OStatus.Done && human.hasDiscovered(getZone(STARTER_CARVED_STONE_TILE_ID))){
-		msg("Found lore stone");
-		state.objectives.setStatus(FIND_STARTING_STONE_ID, OStatus.Done);
-		sendCameraToBuilding(findBuildingInZone(STARTER_CARVED_STONE_TILE_ID, Building.CarvedStone));
-		pauseAndShowDialog(DIALOG.found_lore_stone);
+		if(canSendDialogThisUpdate()) {
+			msg("Found lore stone");
+			state.objectives.setStatus(FIND_STARTING_STONE_ID, OStatus.Done);
+			sendCameraToBuilding(findBuildingInZone(STARTER_CARVED_STONE_TILE_ID, Building.CarvedStone));
+			pauseAndShowDialog(DIALOG.found_lore_stone);
+		}
 	}
 
 	if(state.objectives.getStatus(FIND_GRAVEYARD_ID) != OStatus.Done && human.hasDiscovered(getZone(GRAVEYARD_ZONE_ID))){
-		msg("Found graveyard stone");
-		state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
-		sendCameraToZone(GRAVEYARD_ZONE_ID);
-		pauseAndShowDialog(DIALOG.found_grave_yard);
+		if(canSendDialogThisUpdate()) {
+			msg("Found graveyard stone");
+			state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
+			sendCameraToZone(GRAVEYARD_ZONE_ID);
+			pauseAndShowDialog(DIALOG.found_grave_yard);
+		}
 	}
 
-	if(DIALOG.stone_circle_first_found.length > 0
+	if(!foundFirstStoneCirlce
 			&& (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0]))) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
-		var foundZone = LORE_CIRCLE_ZONE_IDS[1];
-		if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
-			foundZone = LORE_CIRCLE_ZONE_IDS[0];
+		if(canSendDialogThisUpdate()) {
+			var foundZone = LORE_CIRCLE_ZONE_IDS[1];
+			if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
+				foundZone = LORE_CIRCLE_ZONE_IDS[0];
 
-		msg("Found first stone circle");
-		sendCameraToZone(foundZone);
-		pauseAndShowDialog(DIALOG.stone_circle_first_found);
-		DIALOG.stone_circle_first_found = [];
+			msg("Found first stone circle");
+			sendCameraToZone(foundZone);
+			pauseAndShowDialog(DIALOG.stone_circle_first_found);
+			foundFirstStoneCirlce = true;
+		}
 	}
 
 	if(state.objectives.getStatus(FIND_STONE_CIRCLES_ID) == OStatus.Empty && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
-		msg("Found both circle sites");
-		pauseAndShowDialog(DIALOG.stone_circle_both_found);
-		state.objectives.setStatus(FIND_STONE_CIRCLES_ID, OStatus.Done);
+		if(canSendDialogThisUpdate()) {
+			msg("Found both circle sites");
+			pauseAndShowDialog(DIALOG.stone_circle_both_found);
+			state.objectives.setStatus(FIND_STONE_CIRCLES_ID, OStatus.Done);
+		}
 	}
 
 	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
@@ -684,6 +702,7 @@ function checkObjectives() {
 			takeResources(SHIP_DATA.resources);
 
 			// only move so many units at a time, picking randomly
+			// More than 6 will crash the game, fun fact
 			var units = [].concat(getZone(PORT_ZONE_ID).units.slice(0, 4));
 			var types = [];
 			for(u in units) {
@@ -852,39 +871,49 @@ function manageBadEndingObjectives() {
  */
 function checkDialog() {
 	if(DIALOG.opening.length > 0 && TIME_TO_OPENING_DIALOG < state.time) {
-		msg("Opening dialog shown");
-		pauseAndShowDialog(DIALOG.opening);
-		DIALOG.opening = [];
-		state.objectives.setVisible(FIND_STARTING_STONE_ID, true);
+		if(canSendDialogThisUpdate()) {
+			msg("Opening dialog shown");
+			pauseAndShowDialog(DIALOG.opening);
+			DIALOG.opening = [];
+			state.objectives.setVisible(FIND_STARTING_STONE_ID, true);
+		}
 	}
 
 	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 3) {
-		msg("Initial explore dialog shown");
-		pauseAndShowDialog(DIALOG.initial_explore);
-		state.objectives.setVisible(PRIMARY_OBJ_ID, true);
-		DIALOG.initial_explore = [];
+		if(canSendDialogThisUpdate()) {
+			msg("Initial explore dialog shown");
+			pauseAndShowDialog(DIALOG.initial_explore);
+			state.objectives.setVisible(PRIMARY_OBJ_ID, true);
+			DIALOG.initial_explore = [];
+		}
 	}
 
 	if(DIALOG.spirit_appears.length > 0 && human.discovered.length == 5) {
-		msg("Spirit Appears dialog shown");
-		pauseAndShowDialog(DIALOG.spirit_appears);
-		DIALOG.spirit_appears = [];
+		if(canSendDialogThisUpdate()) {
+			msg("Spirit Appears dialog shown");
+			pauseAndShowDialog(DIALOG.spirit_appears);
+			DIALOG.spirit_appears = [];
+		}
 	}
 
 	if(SPIRIT_DATA.firstTileTaken && LOST_ZONES.length >= 1) {
-		msg("Spirits took first tile dialog shown");
-		var zone = getZone(LOST_ZONES[0]);
-		moveCamera({x:zone.x, y:zone.y});
-		pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
-		DIALOG.ghosts_take_first_tile = [];
-		SPIRIT_DATA.firstTileTaken = false;
+		if(canSendDialogThisUpdate()) {
+			msg("Spirits took first tile dialog shown");
+			var zone = getZone(LOST_ZONES[0]);
+			moveCamera({x:zone.x, y:zone.y});
+			pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
+			DIALOG.ghosts_take_first_tile = [];
+			SPIRIT_DATA.firstTileTaken = false;
+		}
 	}
 
 	if(!state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId) && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
-		msg("Spirit defeat countdown triggered");
-		pauseAndShowDialog(DIALOG.ghosts_take_many_tiles);
-		DIALOG.ghosts_take_many_tiles = [];
-		state.objectives.setVisible(SPIRIT_DATA.tilesLostRemainingObjId, true);
+		if(canSendDialogThisUpdate()) {
+			msg("Spirit defeat countdown triggered");
+			pauseAndShowDialog(DIALOG.ghosts_take_many_tiles);
+			DIALOG.ghosts_take_many_tiles = [];
+			state.objectives.setVisible(SPIRIT_DATA.tilesLostRemainingObjId, true);
+		}
 	}
 }
 
@@ -1323,23 +1352,37 @@ function calToSeconds(month:Int, year:Int) {
 	return month * 60 + year * 60 * 12;
 }
 
+function canSendDialogThisUpdate(): Bool {
+	return !dialogShownThisUpdate;
+}
+
 /**
  * A helper function to show multiple lines of text.
+ *
+ * Will return false if dialog was not sent, otherwise true.
  */
-function pauseAndShowDialog(dialog) {
+function pauseAndShowDialog(dialog):Bool {
+	if(dialogShownThisUpdate) {
+		debug("WARNING: TRIED TO SEND DIALOG TWICE IN ONE UPDATE: DIALOG NOT SHOWN!");
+		return false;
+	}
 
 	// The checkStudying function may pass in empty dialog, which is fine,
 	// we just don't want to pause and unpause unnecessarily.
 	if(dialog.length == 0)
-		return;
+		return true;
 
 	if(!DIALOG_SUPPRESSED) {
 		setPause(true);
 		for(d in dialog) {
-			talk(d.text, d.option); // editor doesn't understand talk
+			talk(d.text, d.option);
 		}
 		setPause(false);
 	}
+
+	dialogShownThisUpdate = true;
+
+	return true;
 }
 
 /**
