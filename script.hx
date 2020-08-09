@@ -403,15 +403,34 @@ var goodEnding = {
 };
 
 var starterStone = {
+	 // Indicates if a unit has been assigned for the first time
 	firstAssign:true,
+
+	 // How long units have been assigned to the buildings
 	studiedTime:0.0,
+
+	// Totoal time, in seconds, required to complete the objective
 	studyTimeRequired:120,
+
+	// If the objective is completed
 	studied:false,
+
+	// How many lore masters must be assigned, minimum, to earn progress
 	studiersRequired:1,
+
+	// Zones where the studying must happen
 	zoneIds:[STARTER_CARVED_STONE_TILE_ID],
+
+	// Dialog shown as soon as the studying starts
 	startDialog:DIALOG.starter_stone,
+
+	// Dialog shown once finished
 	finishDialog:DIALOG.starter_stone_studied,
+
+	// No setup required
 	setupFinished:true,
+
+	//
 	findNextObjectiveId:FIND_GRAVEYARD_ID,
 }
 
@@ -424,7 +443,7 @@ var graveYardStudying = {
 	zoneIds:[GRAVEYARD_ZONE_ID],
 	startDialog:DIALOG.graveyard_study_start,
 	finishDialog:DIALOG.graveyard_study_finish,
-	setupFinished:true,
+	setupFinished:true, // No setup required
 	findNextObjectiveId:FIND_STONE_CIRCLES_ID,
 }
 
@@ -437,8 +456,8 @@ var stoneCircleStudying = {
 	zoneIds:LORE_CIRCLE_ZONE_IDS,
 	startDialog:DIALOG.stone_circle_start,
 	finishDialog:DIALOG.stone_circle_finish,
-	setupFinished:true,
-	findNextObjectiveId:BUILD_PORT_SEND_SHIP_ID,
+	setupFinished:true, // No setup required
+	findNextObjectiveId:FIND_PORT_SITE_ID,
 }
 
 var islandStudying = {
@@ -450,7 +469,7 @@ var islandStudying = {
 	zoneIds:[MYSTERY_ZONE_ID],
 	startDialog:DIALOG.arrive_at_island,
 	finishDialog:DIALOG.island_finish_placeholder,
-	setupFinished:false,
+	setupFinished:false, // Only objective that requires setup (revealing/taking the island)
 	findNextObjectiveId:null,
 }
 
@@ -1083,6 +1102,11 @@ function ghostsTakeZone(zone:Zone) {
 	}
 }
 
+/**
+ * Decides when a new attack should be launched based on some rolling probability over time.
+ * When an attack is decided, it will pick a zone not already being attacked (either currently or queued)
+ * and then inserts it into the attack queue.
+ */
 function prepareNewAttacks() {
 	var currentYear = timeToYears(state.time);
 
@@ -1132,6 +1156,11 @@ function prepareNewAttacks() {
 	}
 }
 
+/**
+ * Creates the attack struct and inserts it into an attack "queue".
+ *
+ * It also reserves the use of an unused objective to track capture progress.
+ */
 function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
 
 	// find an unused objective
@@ -1264,15 +1293,6 @@ function calToSeconds(month:Int, year:Int) {
 	return month * 60 + year * 60 * 12;
 }
 
-
-/**
- * ======================================================
- * 		At the time of this mod, the Editor is suuuuper buggy and will think things don't exist that do.
- * 		They are shoved at the bottom so other errors have a chance to show up above. Only one error is shown
- * 		at a time, and only top-down.
- * ======================================================
- */
-
 /**
  * A helper function to show multiple lines of text.
  */
@@ -1383,8 +1403,18 @@ function quickButtonCallback() {
 	switch(DEBUG.QUICK_BUTTON_INDEX) {
 		case 0: human.discoverZone(getZone(STARTER_CARVED_STONE_TILE_ID)); debug("Starter stone revealed");
 		case 1: starterStone.studiedTime = starterStone.studyTimeRequired; debug("Studying of starting stone complete");
+
 		case 2: human.discoverZone(getZone(GRAVEYARD_ZONE_ID)); debug("graveyard explored");
-		case 3: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("graveyard explored");
+		case 3: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("graveyard studied");
+
+		case 4: human.discoverZone(getZone(LORE_CIRCLE_ZONE_IDS[0])); debug("explore first circle");
+		case 5: human.discoverZone(getZone(LORE_CIRCLE_ZONE_IDS[1])); debug("explore second circle");
+		case 6: stoneCircleStudying.studiedTime = stoneCircleStudying.studyTimeRequired; debug("Circles studied");
+
+		case 7: human.discoverZone(getZone(PORT_ZONE_ID)); debug("port explored");
+		case 8: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("port built");
+
+		case 9: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("island studied");
 		default:debug("No more next steps");
 	}
 
