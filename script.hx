@@ -120,7 +120,11 @@ var SHIP_DATA = {
 	resources:[{res:Resource.Wood, amt:150}, {res:Resource.Money, amt:75}],
 	callback:"shipUnitsCallback",
 	shipUnitsCallbackPressed:false,
+
+	// True if the next ship sent out is the first, will be false afterwards
 	firstSend: true,
+	portExplored: false,
+	portBuilt: false,
 };
 
 var SPIRIT_DATA = {
@@ -147,7 +151,7 @@ var SPIRIT_DATA = {
 	 * -1 is treated as a special value that applies no modifier.
 	 */
 	deltaOnPreviousAttack:-1,
-	deltaOnPreviousAttackThresholdSeconds:50, // 50 seconds will be the mid-point of the S-curve for how much the penalty will apply. Further from it magnifies result.
+	deltaOnPreviousAttackThresholdSeconds:50, // 50 seconds will be the mid-point of the V-curve for how much the penalty will apply. Further from it magnifies result.
 
 	warningBetweenAttacksSeconds:180.0, // How much warning to give to the player of when the next attack will happen
 	warningBetweenAttacksSecondsGrowth:-25.0, // How much warning time is lost each year
@@ -252,13 +256,13 @@ var DIALOG = {
 
 	initial_explore:[
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Do you feel the sensation that we just don't...belong? I have felt unwanted on many Lore hunts before, but not like this"},
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"I feel something more. The spirits here have a high energy, yet are calm. Or maybe highly focused. I can't explain it."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"I feel something more. The spirits here have a high energy, yet are calm. Or maybe highly focused. I can't explain it."}, // DRAFT DIALOG
 	],
 
 	spirit_appears:[
 		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"YoU daRE to DIstuRb ANDER DRAGE Island? YoU were wArDED awaY, yeT HErE yoU ArE."},
 		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"Go bAck. NevER retUrn...."},
-		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"it aWakENs......"},
+		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"it aWakENs......"}, // DRAFT DIALOG
 		{option:{who:Banner.BossFinalHidden, name:"Restless Spirits"}, text:"BEGONE!"},
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The spirits, their energy is changing. It is bubbling and churning. I fear the island's spiritual world is trying to merge with ours!"},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Then we need to quickly figure out this mystery. I don't think that will be the last of the spirits we see."},
@@ -274,7 +278,7 @@ var DIALOG = {
 
 	starter_stone_studied:[
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We got some information from the stone. Of what we can recover, there was some kind of shipping, or port?, to the North."},
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The South is more interesting, maybe. It indicates some kind of mass burial"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The South is more interesting, maybe. It indicates some kind of mass burial"}, // DRAFT DIALOG
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"We should investigate the South first, there might be more there to learn."},
 	],
 
@@ -292,6 +296,14 @@ var DIALOG = {
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"They used it to keep others away. For what I can't tell. We might be able to use some of this to get off the island."},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Unfortunately, the runes are too unfamiliar and applying them to our ships isn't easy. The first tests failed."},
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"The kobolds to the East might be able to help, if they are willing."},
+	],
+
+	stone_circle_first_found:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This isn't all of the stone circles. I believe another is nearby."}, // DRAFT DIALOG
+	],
+
+	stone_circle_both_found:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"With both circles found send a loremaster to get an initial read on them."}, // DRAFT DIALOG
 	],
 
 	stone_circle_start:[
@@ -614,11 +626,29 @@ function checkObjectives() {
 		pauseAndShowDialog(DIALOG.found_grave_yard);
 	}
 
+	if(DIALOG.stone_circle_first_found.length > 0
+			&& (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0]))) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
+		var foundZone = LORE_CIRCLE_ZONE_IDS[1];
+		if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
+			foundZone = LORE_CIRCLE_ZONE_IDS[0];
+
+		msg("Found first stone circle");
+		sendCameraToZone(foundZone);
+		pauseAndShowDialog(DIALOG.stone_circle_first_found);
+		DIALOG.stone_circle_first_found = [];
+	}
+
+	if(state.objectives.getStatus(FIND_STONE_CIRCLES_ID) == OStatus.Empty && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
+		msg("Found both circle sites");
+		pauseAndShowDialog(DIALOG.stone_circle_both_found);
+		state.objectives.setStatus(FIND_STONE_CIRCLES_ID, OStatus.Done);
+	}
+
 	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
 		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
 	}
 
-	if(stoneCircleStudying.studied && !islandStudying.setupFinished) {
+	if(!islandStudying.setupFinished && SHIP_DATA.portBuilt) {
 		msg("Setting up ship data for mystery island.");
 		islandStudying.setupFinished = true;
 		state.objectives.setVisible(SHIP_DATA.objId, true);
@@ -1412,9 +1442,13 @@ function quickButtonCallback() {
 		case 6: stoneCircleStudying.studiedTime = stoneCircleStudying.studyTimeRequired; debug("Circles studied");
 
 		case 7: human.discoverZone(getZone(PORT_ZONE_ID)); debug("port explored");
-		case 8: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("port built");
+		case 8: SHIP_DATA.portBuilt = true; debug("port built");
 
-		case 9: graveYardStudying.studiedTime = graveYardStudying.studyTimeRequired; debug("island studied");
+		case 9: islandStudying.studiedTime = islandStudying.studyTimeRequired; debug("island studied");
+		case 10: BAD_ENDING_DATA.villagersSacrificed = BAD_ENDING_DATA.sacrificesRequred;
+
+		case 11: human.getWarchief().setPosition(getZone(PORT_ZONE_ID).x, getZone(PORT_ZONE_ID).y); debug("WC moved to port");
+
 		default:debug("No more next steps");
 	}
 
