@@ -103,7 +103,7 @@ var ENDING_BAD = "bad";
  * seems to not treat the first instance as completed and will run it again. Because of this, we only show dialog
  * once an update. Everything should be able to handle being denied one frame of missed dialog/updates.
  */
-var dialogShownThisUpdate = false;
+var dialogShownRecentlyLock = 0;
 
 var SACRIFICE_UNITS_OBJ_ID = "SacrificeUnits";
 
@@ -568,24 +568,27 @@ function onFirstLaunch() {
  */
 function regularUpdate(dt : Float) {
 
-	dialogShownThisUpdate = false;
+	if(dialogShownRecentlyLock > 0)
+		dialogShownRecentlyLock--;
 
 	// Used to print messages occasionally
 	DEBUG.TIME_INDEX++;
 
-	checkObjectives();
+	@split[
+		checkObjectives(),
 
-	checkDialog();
+		checkDialog(),
 
-	checkStudying();
+		checkStudying(),
 
-	checkSpirits();
+		checkSpirits(),
 
-	checkKobolds();
+		checkKobolds(),
 
-	checkGiants();
+		checkGiants(),
 
-	checkEndGame();
+		checkEndGame(),
+	];
 
 	if(toInt(DEBUG.TIME_INDEX) % 30 == 0)
 		msg("running...");
@@ -703,7 +706,7 @@ function checkObjectives() {
 
 			// only move so many units at a time, picking randomly
 			// More than 6 will crash the game, fun fact
-			var units = [].concat(getZone(PORT_ZONE_ID).units.slice(0, 4));
+			var units = getZone(PORT_ZONE_ID).units.slice(0, 4);
 			var types = [];
 			for(u in units) {
 				types.push(u.kind);
@@ -1353,7 +1356,11 @@ function calToSeconds(month:Int, year:Int) {
 }
 
 function canSendDialogThisUpdate(): Bool {
-	return !dialogShownThisUpdate;
+	msg("Checking lock: " + dialogShownRecentlyLock);
+	if(dialogShownRecentlyLock > 0)
+		return false;
+	dialogShownRecentlyLock += 5;
+	return dialogShownRecentlyLock == 5;
 }
 
 /**
@@ -1361,17 +1368,16 @@ function canSendDialogThisUpdate(): Bool {
  *
  * Will return false if dialog was not sent, otherwise true.
  */
-function pauseAndShowDialog(dialog):Bool {
-	if(dialogShownThisUpdate) {
-		debug("WARNING: TRIED TO SEND DIALOG TWICE IN ONE UPDATE: DIALOG NOT SHOWN!");
-		return false;
-	}
+function pauseAndShowDialog(dialog) {
+
+	msg("Lock amount before sending: " + dialogShownRecentlyLock);
 
 	// The checkStudying function may pass in empty dialog, which is fine,
 	// we just don't want to pause and unpause unnecessarily.
 	if(dialog.length == 0)
-		return true;
+		return;
 
+	dialogShownRecentlyLock = 5;
 	if(!DIALOG_SUPPRESSED) {
 		setPause(true);
 		for(d in dialog) {
@@ -1379,10 +1385,6 @@ function pauseAndShowDialog(dialog):Bool {
 		}
 		setPause(false);
 	}
-
-	dialogShownThisUpdate = true;
-
-	return true;
 }
 
 /**
