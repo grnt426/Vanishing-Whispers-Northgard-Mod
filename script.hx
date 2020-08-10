@@ -97,6 +97,7 @@ var TIME_TO_OPENING_DIALOG:Int = 7;
 var ENDING_NEUTRAL = "neutral";
 var ENDING_GOOD = "good";
 var ENDING_BAD = "bad";
+var ENDING_UNDECIDED = "undecided";
 
 /**
  * There are issues with pausing/unpausing and showing dialog multiple times in a single update. The game
@@ -107,7 +108,7 @@ var dialogShownRecentlyLock = 0;
 
 var SACRIFICE_UNITS_OBJ_ID = "SacrificeUnits";
 
-var currentEnding = ENDING_BAD; // This is the current ending the player will get after studying the stones on the mystery island
+var currentEnding = ENDING_UNDECIDED; // This is the current ending the player will get after studying the stones on the mystery island
 var endingObjectiveShown:Bool = false;
 var foundFirstStoneCirlce = false;
 
@@ -133,6 +134,7 @@ var SHIP_DATA = {
 	firstSend: true,
 	portExplored: false,
 	portBuilt: false,
+	portBuilding: null,
 };
 
 var SPIRIT_DATA = {
@@ -294,6 +296,16 @@ var DIALOG = {
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This must be the burial site. I can't tell which clan this belonged to, however."},
 	],
 
+	found_port_site:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"That ship wreck looks like it has bits of a port in it, this must have been where they launched from."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We need to build a port here and send a ship."},
+	],
+
+	port_built:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"With the port built, we can send any villagers on this tile on a ship, though with the weight of the runes we can't send more than four at a time."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"There is also a substantial cost to build, at 150 wood and 75 krowns."},
+	],
+
 	graveyard_study_start:[
 		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"This graveyard has remains from all the clans. If only we could spend more time digging."},
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"No time, it looks like the spirits have noticed out presence here, and they don't like it. Assign two Loremasters quickly."},
@@ -333,7 +345,7 @@ var DIALOG = {
 
 	// placeholder as the struct needs something
 	island_finish_placeholder:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Finished Island"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Finished Island"},  // placeholder dialog
 	],
 
 	island_finish_good:[
@@ -345,7 +357,11 @@ var DIALOG = {
 	],
 
 	island_finish_bad:[
-		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending research finish text, escape start"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Bad ending research finish text, escape start"},  // placeholder dialog
+	],
+
+	bad_ending_sacrifices_done: [
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"Sacrifices finished, now we can escape as the island is (something)"}, // placeholder dialog
 	],
 
 	bad_ending_success:[
@@ -643,8 +659,7 @@ function checkObjectives() {
 		}
 	}
 
-	if(!foundFirstStoneCirlce
-			&& (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0]))) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
+	if(!foundFirstStoneCirlce && (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1])))) {
 		if(canSendDialogThisUpdate()) {
 			var foundZone = LORE_CIRCLE_ZONE_IDS[1];
 			if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
@@ -665,17 +680,48 @@ function checkObjectives() {
 		}
 	}
 
-	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
-		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	if(!SHIP_DATA.portExplored && human.hasDiscovered(getZone(PORT_ZONE_ID))) {
+		if(canSendDialogThisUpdate()) {
+			msg("Found the port site");
+			SHIP_DATA.portExplored = true;
+			sendCameraToZone(PORT_ZONE_ID);
+			pauseAndShowDialog(DIALOG.found_port_site);
+			state.objectives.setStatus(FIND_PORT_SITE_ID, OStatus.Done);
+		}
 	}
 
+	if(!SHIP_DATA.portBuilt) {
+		var buildings = getZone(PORT_ZONE_ID).buildings;
+		for(b in buildings) {
+			if(b.kind == Building.Port) {
+				SHIP_DATA.portBuilt = true;
+				SHIP_DATA.portBuilding = b;
+			}
+		}
+	}
+
+	/**
+	 * We separate the check for the port being built with the check for setting up the ship button
+	 * to make testing a little easier with the test debug button. Otherwise we have no way of triggering it
+	 * from the test button.
+	 */
 	if(!islandStudying.setupFinished && SHIP_DATA.portBuilt) {
+
+		// A guard for the test button, as again the building can't exist in test mode
+		if(SHIP_DATA.portBuilding != null)
+			sendCameraToBuilding(SHIP_DATA.portBuilding);
+		pauseAndShowDialog(DIALOG.port_built);
+
 		msg("Setting up ship data for mystery island.");
 		islandStudying.setupFinished = true;
 		state.objectives.setVisible(SHIP_DATA.objId, true);
 	}
 
 	checkWarchiefAlive();
+
+	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
+		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	}
 
 	// Defeat if the player loses too many tiles
 	if(state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId)) {
@@ -705,16 +751,26 @@ function checkObjectives() {
 			takeResources(SHIP_DATA.resources);
 
 			// only move so many units at a time, picking randomly
-			// More than 6 will crash the game, fun fact
-			var units = getZone(PORT_ZONE_ID).units.slice(0, 4);
+			var allUnits = [].concat(getZone(PORT_ZONE_ID).units);
 			var types = [];
-			for(u in units) {
-				types.push(u.kind);
-				u.die(true, false);
+			for(u in allUnits) {
+				if(u.kind == Unit.Villager && types.length < 5) {
+					types.push(Unit.Villager);
+					u.die(true, false);
+				}
 			}
 
 			drakkar(human, getZone(MYSTERY_ZONE_ID), getZone(PORT_LAUNCH_ZONE_ID), 0, 0, types, .1);
 		}
+	}
+
+	if(islandStudying.studied && currentEnding == ENDING_UNDECIDED) {
+
+		// This is where the ending the player gets is decided.
+
+		// TODO: Forced bad ending for now
+		BAD_ENDING_DATA.currentlySacrificing = true;
+		currentEnding = ENDING_BAD;
 	}
 
 	// The three endings all have their own multi-objective quest line that is tracked separately.
@@ -792,6 +848,8 @@ function handleWarchiefDeathGoodEnding() {
  */
 function manageBadEndingObjectives() {
 
+	sometimesPrint("Sacrificing? " + BAD_ENDING_DATA.currentlySacrificing + " Escaping? " + BAD_ENDING_DATA.currentlyEscaping);
+
 	// PART ONE
 	if(BAD_ENDING_DATA.currentlySacrificing) {
 		// We do a lot of "heavy lifting" in scanning for units, so this has to be in regularUpdate
@@ -812,6 +870,7 @@ function manageBadEndingObjectives() {
 		}
 
 		if(BAD_ENDING_DATA.villagersSacrificed >= BAD_ENDING_DATA.sacrificesRequred) {
+			msg("Sacrifices required has been met, setting up escape for part two of bad ending");
 
 			// Cleanup the sacrifice stuff
 			state.objectives.setStatus(BAD_ENDING_DATA.progressId, OStatus.Done);
@@ -819,7 +878,7 @@ function manageBadEndingObjectives() {
 			state.objectives.setVisible(SACRIFICE_UNITS_OBJ_ID, false);
 			state.objectives.setStatus(BAD_ENDING_DATA.objectiveId, OStatus.Done);
 
-			// TODO show dialog to escape
+			pauseAndShowDialog(DIALOG.bad_ending_sacrifices_done);
 
 			// Show the final step in the quest, escape with your warchief
 			BAD_ENDING_DATA.currentlyEscaping = true;
@@ -838,16 +897,17 @@ function manageBadEndingObjectives() {
 			state.objectives.setVisible(BAD_ENDING_DATA.progressId, false);
 
 		if(meetsRequirements(BAD_ENDING_DATA.escapeObjResourceRequirements)) {
-			var units = getZone(PORT_ZONE_ID).units;
-			var wcOnTile = false;
-			for(u in units) {
-				if(u == human.getWarchief()) {
-					u.die(true, false);
-					wcOnTile = true;
-				}
-			}
+			// var units = getZone(PORT_ZONE_ID).units;
+			// var wcOnTile = false;
 
-			if(wcOnTile) {
+			// for(u in units) {
+			// 	if(u == human.getWarchief()) {
+			// 		u.die(true, false);
+			// 		wcOnTile = true;
+			// 	}
+			// }
+
+			if(human.getWarchief().zone == getZone(PORT_ZONE_ID)) {
 
 				// This isn't really necessary, as the player will shortly win anyway, but it may make it seem
 				// like the player just barely escaped, which is a good feeling
@@ -863,6 +923,9 @@ function manageBadEndingObjectives() {
 				BAD_ENDING_DATA.timeFinished = state.time;
 				BAD_ENDING_DATA.successfullyFinished = true; // Hooray! You are a terrible person that killed their followers to get your own skin to safety! Yay! :D
 			}
+		}
+		else{
+			msg("Not enough resources to escape");
 		}
 	}
 }
@@ -1189,7 +1252,7 @@ function prepareNewAttacks() {
 			proba = prevAttackTime < SPIRIT_DATA.deltaOnPreviousAttackThresholdSeconds ? proba * 0.1 : proba * 1.1;
 		}
 
-		rarelyPrint("PROBABILITY: " + proba + " RANDOM: " + random());
+		// rarelyPrint("PROBABILITY: " + proba + " RANDOM: " + random());
 
 		if(random() < proba){
 			var min = toInt(SPIRIT_DATA.spiritMin + (SPIRIT_DATA.spiritMinGrowth * currentYear));
@@ -1356,7 +1419,7 @@ function calToSeconds(month:Int, year:Int) {
 }
 
 function canSendDialogThisUpdate(): Bool {
-	msg("Checking lock: " + dialogShownRecentlyLock);
+	// msg("Checking lock: " + dialogShownRecentlyLock);
 	if(dialogShownRecentlyLock > 0)
 		return false;
 	dialogShownRecentlyLock += 5;
@@ -1370,7 +1433,7 @@ function canSendDialogThisUpdate(): Bool {
  */
 function pauseAndShowDialog(dialog) {
 
-	msg("Lock amount before sending: " + dialogShownRecentlyLock);
+	// msg("Lock amount before sending: " + dialogShownRecentlyLock);
 
 	// The checkStudying function may pass in empty dialog, which is fine,
 	// we just don't want to pause and unpause unnecessarily.
@@ -1493,6 +1556,8 @@ function quickButtonCallback() {
 		case 10: BAD_ENDING_DATA.villagersSacrificed = BAD_ENDING_DATA.sacrificesRequred;
 
 		case 11: human.getWarchief().setPosition(getZone(PORT_ZONE_ID).x, getZone(PORT_ZONE_ID).y); debug("WC moved to port");
+
+		case 12: human.addResource(Resource.Stone, 5); debug("Resources added to meet end game requirement.");
 
 		default:debug("No more next steps");
 	}
