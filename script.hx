@@ -26,7 +26,7 @@ DEBUG = {
 
 	TIME_INDEX:0,
 
-	QUICK_BUTTON:true,
+	QUICK_BUTTON:false,
 	QUICK_BUTTON_INDEX:0,
 }
 
