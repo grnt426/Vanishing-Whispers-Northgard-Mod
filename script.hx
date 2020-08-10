@@ -13,7 +13,7 @@
  */
 var human:Player;
 
-var VERSION = "1.3";
+var VERSION = "1.4";
 
 DEBUG = {
 	SKIP_STUDYING: false,
@@ -848,8 +848,6 @@ function handleWarchiefDeathGoodEnding() {
  */
 function manageBadEndingObjectives() {
 
-	sometimesPrint("Sacrificing? " + BAD_ENDING_DATA.currentlySacrificing + " Escaping? " + BAD_ENDING_DATA.currentlyEscaping);
-
 	// PART ONE
 	if(BAD_ENDING_DATA.currentlySacrificing) {
 		// We do a lot of "heavy lifting" in scanning for units, so this has to be in regularUpdate
@@ -897,21 +895,12 @@ function manageBadEndingObjectives() {
 			state.objectives.setVisible(BAD_ENDING_DATA.progressId, false);
 
 		if(meetsRequirements(BAD_ENDING_DATA.escapeObjResourceRequirements)) {
-			// var units = getZone(PORT_ZONE_ID).units;
-			// var wcOnTile = false;
-
-			// for(u in units) {
-			// 	if(u == human.getWarchief()) {
-			// 		u.die(true, false);
-			// 		wcOnTile = true;
-			// 	}
-			// }
-
 			if(human.getWarchief().zone == getZone(PORT_ZONE_ID)) {
 
 				// This isn't really necessary, as the player will shortly win anyway, but it may make it seem
 				// like the player just barely escaped, which is a good feeling
 				takeResources(BAD_ENDING_DATA.escapeObjResourceRequirements);
+				human.getWarchief().die(true, false);
 
 				state.objectives.setStatus(PRIMARY_OBJ_ID, OStatus.Done);
 				state.objectives.setStatus(BAD_ENDING_DATA.escapeObjId, OStatus.Done);
@@ -923,9 +912,6 @@ function manageBadEndingObjectives() {
 				BAD_ENDING_DATA.timeFinished = state.time;
 				BAD_ENDING_DATA.successfullyFinished = true; // Hooray! You are a terrible person that killed their followers to get your own skin to safety! Yay! :D
 			}
-		}
-		else{
-			msg("Not enough resources to escape");
 		}
 	}
 }
@@ -1000,7 +986,10 @@ function checkStudying() {
 		checkStudyingProgress(stoneCircleStudying);
 	else if(!islandStudying.studied)
 		checkStudyingProgress(islandStudying);
-	else if(!endingObjectiveShown) {
+
+	// We do a small check here for if the ending was decided as other instances of this script running might beat us here
+	// I haven't seen this in testing, but this guard is simple enough
+	else if(!endingObjectiveShown && currentEnding != ENDING_UNDECIDED) {
 		endingObjectiveShown = true;
 		switch(currentEnding) {
 			case ENDING_BAD: setupBadEnding();
