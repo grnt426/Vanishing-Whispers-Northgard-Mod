@@ -28,6 +28,8 @@ DEBUG = {
 
 	QUICK_BUTTON:false,
 	QUICK_BUTTON_INDEX:0,
+
+	QUICK_GIANTS:true,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -39,7 +41,7 @@ var LORE_CIRCLE_ZONE_IDS = [41, 45];
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
 var BRAMBLES_TILE_ID = 82;
-var GIANT_CAMP = 74;
+var GIANT_CAMP_TILE_ID = 74;
 
 /**
  * These zones will not be captured by the spirits, but they can attack them
@@ -50,7 +52,7 @@ var GIANT_CAMP = 74;
  *
  * All other zones are capturable by the spirits, and once captured, lost forever.
  */
-var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, GIANT_CAMP];
+var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, GIANT_CAMP_TILE_ID];
 
 /**
  * These zones are where the spirits will launch their attacks. Once captured,
@@ -375,7 +377,7 @@ var DIALOG = {
 	giants_initial_contact:[
 		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"Hey! Finally, someone to save me! My brethern have all fallen and I am the last Giant on this island."},
 		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"When they left the island so long ago, we had collected their treasure for ourselves."},
-		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"But now I am without food or firewood. If you could help me, I will share some of the spoils."},
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"But now I am without food or firewood and very weak. If you could help me, I will share some of the spoils."},
 	],
 
 	giants_first_attacked:[
@@ -383,7 +385,18 @@ var DIALOG = {
 	],
 
 	giants_befriended:[
-		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"You seek to steal all my treasures!? I may be alone, but I am still bigger than all of you combined!"},
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"Thank you, friend. Please, have some of the Krowns I have safe guarded, and I shall help you develop your lands more cheaply."},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"With the lower development cost, we will also get a small production boost to any developed zone."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"I think we should throw a feast in honor of our newly found friend?"},
+	],
+
+	giant_destroyed:[
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"A difficult decision, but these spirits would have consumed the island and that Giant. At least we can use these spoils."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Lots of hard resources, some lore, plans for a 3rd upgrade to defensive towers, and now when we earn military experience we get lore and fame."},
+	],
+
+	giant_betrayed:[
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"You are filth, just like the ones before you. With my dying breath, a curse upon your clan!"},
 	],
 
 	/**
@@ -396,7 +409,7 @@ var DIALOG = {
 	/**
 	 * If the warchief dies when the angry spirits spawn, but does not die in battle to them.
 	 */
-	warchief_died_good_ending:[
+	warchief_died_not_sacrificed:[
 
 	],
 };
@@ -409,24 +422,32 @@ var KOBOLD_DATA = {
 };
 
 var GIANT_DATA = {
-	befriended: false,
-	enemy: false,
 	initialContact: false,
-	attackObjId: "Remove the Giants",
-
 	tileForInitialContact:BRAMBLES_TILE_ID,
 	initialContactDialog:DIALOG.giants_initial_contact,
+	loneGiant: null,
+	loneGiantDefeated: false,
+	donateButtonPressed: false,
 
+	// Betray data
+	enemy: false,
+	attackObjId: "Remove the Giants",
 	firstAttackDialog:DIALOG.giants_first_attacked,
 
-	befriendedDialog:DIALOG.giants_befriended,
-
-	destroyReward:[{res:Resource.Money, amt:500}, {res:Resource.Food, amt:100}, {res:Resource.Stone, amt:10}, {res:Resource.Iron, amt:5}],
+	destroyReward:[{res:Resource.Money, amt:500}, {res:Resource.Lore, amt:250}, {res:Resource.Stone, amt:10}, {res:Resource.Iron, amt:5}],
 	destroyTechReward:[Tech.BFTower, Tech.Warcraft], // upgraded towers and warcraft (mil XP => lore&fame)
+
+
+	// Befriend data
+	befriended: false,
+	befriendObjId: "Befriend the Giants",
+	befriendedDialog:DIALOG.giants_befriended,
 
 	befriendReward:[{res:Resource.Money, amt:250}],
 	befriendFeastReward:1,
 	befriendTechReward:[Tech.CityBuilder],
+
+	befriendResourcesRequired:[{res:Resource.Food, amt:300}, {res:Resource.Wood, amt:200}],
 };
 
 
@@ -573,13 +594,7 @@ function onFirstLaunch() {
 	// Only one Jotnar should be on the Jotunn camp
 	// we concat to an empty array so we can freely kill the unit, as the original
 	// array gets modified by the game engine when a unit dies
-	var giants = [].concat(getZone(GIANT_CAMP).units);
-	if(giants.length > 1) {
-		var killem = giants.slice(0, giants.length-2);
-		for(u in killem) {
-			u.die(true, false);
-		}
-	}
+	GIANT_DATA.loneGiant = getZone(GIANT_CAMP_TILE_ID).units[0];
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
@@ -670,7 +685,76 @@ function checkKobolds() {
 }
 
 function checkGiants() {
+	if(!GIANT_DATA.initialContact) {
+		if(human.hasDiscovered(getZone(BRAMBLES_TILE_ID))) {
+			if(canSendDialogThisUpdate()) {
+				GIANT_DATA.initialContact = true;
+				pauseAndShowDialog(GIANT_DATA.initialContactDialog);
 
+				// TODO show objectives
+			}
+		}
+	}
+	else if(!GIANT_DATA.enemy) {
+
+		// Anything other than the giant is considered an attack against them.
+		// This should be fine, as spirits are setup to avoid their camp,
+		// and nothing can roam the map into their tile
+		var units = getZone(GIANT_CAMP_TILE_ID).units;
+		if(units.length > 1) {
+			for(u in units) {
+				if(u.isMilitary) {
+					GIANT_DATA.enemy = true;
+					pauseAndShowDialog(GIANT_DATA.firstAttackDialog);
+
+					// The player can "befriend" the giant, and then attack them afterward.
+					// This gives no reward, but will curse all the units in the area upon its defeat
+					if(GIANT_DATA.befriended) {
+						state.objectives.setVisible(GIANT_DATA.befriendObjId, true);
+						state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Missed);
+					}
+					else {
+						state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Missed);
+					}
+					break;
+				}
+			}
+		}
+	}
+
+	if(GIANT_DATA.enemy && !GIANT_DATA.loneGiantDefeated) {
+		if(GIANT_DATA.loneGiant.hitLife <= 0) {
+			GIANT_DATA.loneGiantDefeated = true;
+			state.objectives.setStatus(GIANT_DATA.attackObjId, OStatus.Done);
+			if(GIANT_DATA.befriended) {
+				pauseAndShowDialog(DIALOG.giant_betrayed);
+				for(u in human.units) {
+					if(u.isMilitary)
+						u.hitLife *= 0.5;
+					else
+						u.hitLife *= 0.75;
+				}
+			}
+			else {
+				giveResources(GIANT_DATA.destroyReward);
+				human.setTech(GIANT_DATA.destroyTechReward);
+				pauseAndShowDialog(DIALOG.giant_destroyed);
+			}
+		}
+	}
+
+	if(GIANT_DATA.donateButtonPressed) {
+		if(canSendDialogThisUpdate()) {
+			GIANT_DATA.donateButtonPressed = false;
+			GIANT_DATA.befriended = true;
+			giveResources(GIANT_DATA.befriendReward);
+			human.setTech(GIANT_DATA.befriendTechReward);
+			human.freeFeast += GIANT_DATA.befriendFeastReward;
+			pauseAndShowDialog(GIANT_DATA.befriendedDialog);
+			state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
+			state.objectives.setVisible(GIANT_DATA.attackObjId, false);
+		}
+	}
 }
 
 /**
@@ -1400,6 +1484,10 @@ function sacrificeUnitsCallback() {
 	BAD_ENDING_DATA.sacrificeButtonPressed = true;
 }
 
+function donatedToGiantsCallback() {
+	GIANT_DATA.donateButtonPressed = true;
+}
+
 /**
  * Given an array of resources structs {Resource, Int}, will return True if the player has all the resources
  */
@@ -1509,6 +1597,9 @@ function setupObjectives() {
 	if(DEBUG.QUICK_BUTTON) {
 		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
 	}
+	if(DEBUG.QUICK_GIANTS) {
+		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
+	}
 
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
 
@@ -1535,6 +1626,10 @@ function setupObjectives() {
 	// Misc objectivs, or actionable buttons for objectives
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
 	state.objectives.add(SACRIFICE_UNITS_OBJ_ID, "Sacrifice Units to the Altar", {visible:false}, {name:"Sacrifice All", action:"sacrificeUnitsCallback"});
+
+	// Giants objectives
+	state.objectives.add(GIANT_DATA.attackObjId, GIANT_DATA.attackObjId, {visible:false});
+	state.objectives.add(GIANT_DATA.befriendObjId, GIANT_DATA.befriendObjId, {visible:false}, {name:"Donate", action:"donatedToGiantsCallback"});
 
 	state.objectives.add(NORTH_ID, "Attack In the North", {visible:false});
 	state.objectives.add(EAST_ID, "Attack In the East", {visible:false});
