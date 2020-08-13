@@ -1,7 +1,19 @@
 {
+	"unit": {
+		"Sailor": {
+			"produce": {
+				"0": {
+					"q": 0.4
+				}
+			}
+		}
+	},
 	"cst": {
 		"ColonizeCostFactor": {
 			"value": 1.1
+		},
+		"BaseAssign": {
+			"value": 3
 		}
 	}
 }

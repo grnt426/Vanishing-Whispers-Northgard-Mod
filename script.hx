@@ -38,6 +38,8 @@ var PORT_LAUNCH_ZONE_ID: Int = 20;
 var LORE_CIRCLE_ZONE_IDS = [41, 45];
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
+var BRAMBLES_TILE_ID = 82;
+var GIANT_CAMP = 74;
 
 /**
  * These zones will not be captured by the spirits, but they can attack them
@@ -48,7 +50,7 @@ var STARTER_CARVED_STONE_TILE_ID: Int = 76;
  *
  * All other zones are capturable by the spirits, and once captured, lost forever.
  */
-var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, 74];
+var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, GIANT_CAMP];
 
 /**
  * These zones are where the spirits will launch their attacks. Once captured,
@@ -215,25 +217,6 @@ var SPIRIT_DATA = {
 	],
 };
 
-var KOBOLD_DATA = {
-	befriended: false,
-	enemy: false,
-	initialContact: false,
-	attackKoboldObjId: "Remove the Kobolds",
-};
-
-var GIANT_DATA = {
-	befriended: false,
-	enemy: false,
-	initialContact: false,
-	attackKoboldObjId: "Remove the Giants",
-
-	destroyReward:[{res:Resource.Wood, amt:200}, {res:Resource.Food, amt:200}],
-	destroyTechReward:[Tech.BFTower, Tech.Warcraft], // upgraded towers and warcraft (mil XP => lore&fame)
-
-	befriendReward:3, // free feasts
-};
-
 /**
  * All the dialog used in the cutscenes
  *
@@ -389,6 +372,20 @@ var DIALOG = {
 		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"SVARN! He has been lost...this expedition is lost..."},
 	],
 
+	giants_initial_contact:[
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"Hey! Finally, someone to save me! My brethern have all fallen and I am the last Giant on this island."},
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"When they left the island so long ago, we had collected their treasure for ourselves."},
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"But now I am without food or firewood. If you could help me, I will share some of the spoils."},
+	],
+
+	giants_first_attacked:[
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"You seek to steal all my treasures!? I may be alone, but I am still bigger than all of you combined!"},
+	],
+
+	giants_befriended:[
+		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"You seek to steal all my treasures!? I may be alone, but I am still bigger than all of you combined!"},
+	],
+
 	/**
 	 * For the good ending, when dying in battle.
 	 */
@@ -403,6 +400,35 @@ var DIALOG = {
 
 	],
 };
+
+var KOBOLD_DATA = {
+	befriended: false,
+	enemy: false,
+	initialContact: false,
+	attackObjId: "Remove the Kobolds",
+};
+
+var GIANT_DATA = {
+	befriended: false,
+	enemy: false,
+	initialContact: false,
+	attackObjId: "Remove the Giants",
+
+	tileForInitialContact:BRAMBLES_TILE_ID,
+	initialContactDialog:DIALOG.giants_initial_contact,
+
+	firstAttackDialog:DIALOG.giants_first_attacked,
+
+	befriendedDialog:DIALOG.giants_befriended,
+
+	destroyReward:[{res:Resource.Money, amt:500}, {res:Resource.Food, amt:100}, {res:Resource.Stone, amt:10}, {res:Resource.Iron, amt:5}],
+	destroyTechReward:[Tech.BFTower, Tech.Warcraft], // upgraded towers and warcraft (mil XP => lore&fame)
+
+	befriendReward:[{res:Resource.Money, amt:250}],
+	befriendFeastReward:1,
+	befriendTechReward:[Tech.CityBuilder],
+};
+
 
 var BAD_ENDING_DATA = {
 	villagersSacrificed:0,
@@ -543,6 +569,17 @@ function onFirstLaunch() {
 
 	// Clean up type data placeholders
 	SPIRIT_DATA.attackData.pop();
+
+	// Only one Jotnar should be on the Jotunn camp
+	// we concat to an empty array so we can freely kill the unit, as the original
+	// array gets modified by the game engine when a unit dies
+	var giants = [].concat(getZone(GIANT_CAMP).units);
+	if(giants.length > 1) {
+		var killem = giants.slice(0, giants.length-2);
+		for(u in killem) {
+			u.die(true, false);
+		}
+	}
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
@@ -1264,9 +1301,6 @@ function prepareNewAttacks() {
 			populateAttackData(getZone(zoneId), spirits, warning + state.time);
 			SPIRIT_DATA.timeofLastAttackSent = state.time;
 		}
-	}
-	else {
-		rarelyPrint("Not ready to send attacks");
 	}
 }
 
