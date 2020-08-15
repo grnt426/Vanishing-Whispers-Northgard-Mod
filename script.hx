@@ -30,6 +30,7 @@ DEBUG = {
 	QUICK_BUTTON_INDEX:0,
 
 	QUICK_GIANTS:true,
+	QUICK_GIANTS_INDEX:0,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -102,6 +103,21 @@ var ENDING_NEUTRAL = "neutral";
 var ENDING_GOOD = "good";
 var ENDING_BAD = "bad";
 var ENDING_UNDECIDED = "undecided";
+
+// Placeholder value for the fadeObjectiveVisibility queue
+var EMPTY_VISIBILITY = {id:"placeholder", time:0};
+
+/**
+ * Used to automatically manage fading objectives that are completed (Missed/Done). It keeps the objective in this list
+ * until 15 seconds after being registered, then the objective's visibility is set to false, and removed from this list.
+ *
+ * This list is treated as a Queue datastructure, with new objectives always appended to the end, and only removed from the front.
+ *
+ * The initial value in the list is a placeholder value to hint to the type system what type we want.
+ */
+var fadeObjectiveVisibility = [
+	EMPTY_VISIBILITY,
+];
 
 /**
  * There are issues with pausing/unpausing and showing dialog multiple times in a single update. The game
@@ -431,7 +447,7 @@ var GIANT_DATA = {
 
 	// Betray data
 	enemy: false,
-	attackObjId: "Remove the Giants",
+	attackObjId: "Remove the weak Giant",
 	firstAttackDialog:DIALOG.giants_first_attacked,
 
 	destroyReward:[{res:Resource.Money, amt:500}, {res:Resource.Lore, amt:250}, {res:Resource.Stone, amt:10}, {res:Resource.Iron, amt:5}],
@@ -440,12 +456,12 @@ var GIANT_DATA = {
 
 	// Befriend data
 	befriended: false,
-	befriendObjId: "Befriend the Giants",
+	befriendObjId: "Befriend the Giant",
 	befriendedDialog:DIALOG.giants_befriended,
 
 	befriendReward:[{res:Resource.Money, amt:250}],
 	befriendFeastReward:1,
-	befriendTechReward:[Tech.CityBuilder],
+	befriendTechReward:[Tech.CityBuilder], // Reduces development cost and provides prod bonus to developed tiles
 
 	befriendResourcesRequired:[{res:Resource.Food, amt:300}, {res:Resource.Wood, amt:200}],
 };
@@ -680,18 +696,31 @@ function checkEndGame() {
 	}
 }
 
+/**
+ * The kobolds are one of two neutral factions on the island. The player's interactions contributes to the "morality" of the player.
+ * If they help the kobolds, they get the neutral ending. If they help the kobolds and help the giant, they get the good ending.
+ */
 function checkKobolds() {
 
 }
 
+/**
+ * The giants are one of two neutral factions on the island. The player's interactions contribute to the "morality" of the player.
+ * If they help the giants, they are able to get the neutral ending.
+ *
+ * Doing nothing to the giants, and attacking the kobolds, will cause the bad ending.
+ */
 function checkGiants() {
 	if(!GIANT_DATA.initialContact) {
-		if(human.hasDiscovered(getZone(BRAMBLES_TILE_ID))) {
+		if(human.hasDiscovered(getZone(GIANT_DATA.tileForInitialContact))) {
 			if(canSendDialogThisUpdate()) {
 				GIANT_DATA.initialContact = true;
+				human.discoverZone(getZone(GIANT_CAMP_TILE_ID));
+				sendCameraToZone(GIANT_CAMP_TILE_ID);
 				pauseAndShowDialog(GIANT_DATA.initialContactDialog);
 
-				// TODO show objectives
+				state.objectives.setVisible(GIANT_DATA.befriendObjId, true);
+				state.objectives.setVisible(GIANT_DATA.attackObjId, true);
 			}
 		}
 	}
@@ -746,13 +775,14 @@ function checkGiants() {
 	if(GIANT_DATA.donateButtonPressed) {
 		if(canSendDialogThisUpdate()) {
 			GIANT_DATA.donateButtonPressed = false;
+			takeResources(GIANT_DATA.befriendResourcesRequired);
 			GIANT_DATA.befriended = true;
 			giveResources(GIANT_DATA.befriendReward);
 			human.setTech(GIANT_DATA.befriendTechReward);
 			human.freeFeast += GIANT_DATA.befriendFeastReward;
-			pauseAndShowDialog(GIANT_DATA.befriendedDialog);
 			state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
 			state.objectives.setVisible(GIANT_DATA.attackObjId, false);
+			pauseAndShowDialog(GIANT_DATA.befriendedDialog);
 		}
 	}
 }
@@ -1598,7 +1628,7 @@ function setupObjectives() {
 		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
 	}
 	if(DEBUG.QUICK_GIANTS) {
-		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
+		state.objectives.add("QuickGiantsFriendly", "Quick Giants", {visible:true}, {name:"Next", action:"quickGiantsButtonCallback"});
 	}
 
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
@@ -1681,4 +1711,14 @@ function quickButtonCallback() {
 	}
 
 	DEBUG.QUICK_BUTTON_INDEX++;
+}
+
+function quickGiantsButtonCallback() {
+	switch(DEBUG.QUICK_GIANTS_INDEX) {
+		case 0: human.discoverZone(getZone(BRAMBLES_TILE_ID)); debug("Revealed brambles.");
+		case 1: human.addResource(Resource.Wood, 1000); human.addResource(Resource.Food, 1000); debug("Gave resources");
+		default: debug("No more next steps");
+	}
+
+	DEBUG.QUICK_GIANTS_INDEX++;
 }
