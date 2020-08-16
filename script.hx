@@ -13,7 +13,7 @@
  */
 var human:Player;
 
-var VERSION = "1.4";
+var VERSION = "1.5";
 
 DEBUG = {
 	SKIP_STUDYING: false,
@@ -29,8 +29,9 @@ DEBUG = {
 	QUICK_BUTTON:false,
 	QUICK_BUTTON_INDEX:0,
 
-	QUICK_GIANTS:true,
+	QUICK_GIANTS:false,
 	QUICK_GIANTS_INDEX:0,
+	QUICK_GIANTS_BETRAY:false,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -105,7 +106,7 @@ var ENDING_BAD = "bad";
 var ENDING_UNDECIDED = "undecided";
 
 // Placeholder value for the fadeObjectiveVisibility queue
-var EMPTY_VISIBILITY = {id:"placeholder", time:0};
+var EMPTY_VISIBILITY = {id:"placeholder", time:0.0};
 
 /**
  * Used to automatically manage fading objectives that are completed (Missed/Done). It keeps the objective in this list
@@ -447,7 +448,7 @@ var GIANT_DATA = {
 
 	// Betray data
 	enemy: false,
-	attackObjId: "Remove the weak Giant",
+	attackObjId: "Kill weak Giant, plunder treasure",
 	firstAttackDialog:DIALOG.giants_first_attacked,
 
 	destroyReward:[{res:Resource.Money, amt:500}, {res:Resource.Lore, amt:250}, {res:Resource.Stone, amt:10}, {res:Resource.Iron, amt:5}],
@@ -463,7 +464,7 @@ var GIANT_DATA = {
 	befriendFeastReward:1,
 	befriendTechReward:[Tech.CityBuilder], // Reduces development cost and provides prod bonus to developed tiles
 
-	befriendResourcesRequired:[{res:Resource.Food, amt:300}, {res:Resource.Wood, amt:200}],
+	befriendResourcesRequired:[{res:Resource.Food, amt:300}, {res:Resource.Wood, amt:250}],
 };
 
 
@@ -672,6 +673,8 @@ function regularUpdate(dt : Float) {
 		checkGiants(),
 
 		checkEndGame(),
+
+		fadeObjectives(),
 	];
 
 	if(toInt(DEBUG.TIME_INDEX) % 30 == 0)
@@ -694,6 +697,26 @@ function checkEndGame() {
 				}
 			}
 	}
+}
+
+/**
+ * Handles fading objectives over time.
+ */
+function fadeObjectives() {
+	var obj = fadeObjectiveVisibility[0];
+	while(obj.time + 15 < state.time) {
+		fadeObjectiveVisibility.shift();
+		if(obj != EMPTY_VISIBILITY)
+			state.objectives.setVisible(obj.id, false);
+		obj = fadeObjectiveVisibility[0];
+	}
+}
+
+/**
+ * Given an objective id, will ensure it is appropriately setVisibile = false after some time.
+ */
+function registerObjectiveToFade(id:String) {
+	fadeObjectiveVisibility.push({id:id, time:state.time});
 }
 
 /**
@@ -741,9 +764,11 @@ function checkGiants() {
 					if(GIANT_DATA.befriended) {
 						state.objectives.setVisible(GIANT_DATA.befriendObjId, true);
 						state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Missed);
+						registerObjectiveToFade(GIANT_DATA.befriendObjId);
 					}
 					else {
 						state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Missed);
+						registerObjectiveToFade(GIANT_DATA.befriendObjId);
 					}
 					break;
 				}
@@ -752,16 +777,17 @@ function checkGiants() {
 	}
 
 	if(GIANT_DATA.enemy && !GIANT_DATA.loneGiantDefeated) {
-		if(GIANT_DATA.loneGiant.hitLife <= 0) {
+		if(GIANT_DATA.loneGiant.life <= 0) {
 			GIANT_DATA.loneGiantDefeated = true;
 			state.objectives.setStatus(GIANT_DATA.attackObjId, OStatus.Done);
+			registerObjectiveToFade(GIANT_DATA.attackObjId);
 			if(GIANT_DATA.befriended) {
 				pauseAndShowDialog(DIALOG.giant_betrayed);
 				for(u in human.units) {
 					if(u.isMilitary)
-						u.hitLife *= 0.5;
+						u.hitLife = u.maxLife * 0.5;
 					else
-						u.hitLife *= 0.75;
+						u.hitLife = u.maxLife * 0.25;
 				}
 			}
 			else {
@@ -773,7 +799,12 @@ function checkGiants() {
 	}
 
 	if(GIANT_DATA.donateButtonPressed) {
-		if(canSendDialogThisUpdate()) {
+
+		// This is a guard in case the button was pressed at the same time they betrayed the giants
+		if(GIANT_DATA.enemy) {
+			GIANT_DATA.donateButtonPressed = false;
+		}
+		else if(canSendDialogThisUpdate()) {
 			GIANT_DATA.donateButtonPressed = false;
 			takeResources(GIANT_DATA.befriendResourcesRequired);
 			GIANT_DATA.befriended = true;
@@ -783,6 +814,8 @@ function checkGiants() {
 			state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
 			state.objectives.setVisible(GIANT_DATA.attackObjId, false);
 			pauseAndShowDialog(GIANT_DATA.befriendedDialog);
+			registerObjectiveToFade(GIANT_DATA.befriendObjId);
+			registerObjectiveToFade(GIANT_DATA.attackObjId);
 		}
 	}
 }
@@ -796,6 +829,7 @@ function checkObjectives() {
 		if(canSendDialogThisUpdate()) {
 			msg("Found lore stone");
 			state.objectives.setStatus(FIND_STARTING_STONE_ID, OStatus.Done);
+			registerObjectiveToFade(FIND_STARTING_STONE_ID);
 			sendCameraToBuilding(findBuildingInZone(STARTER_CARVED_STONE_TILE_ID, Building.CarvedStone));
 			pauseAndShowDialog(DIALOG.found_lore_stone);
 		}
@@ -805,6 +839,7 @@ function checkObjectives() {
 		if(canSendDialogThisUpdate()) {
 			msg("Found graveyard stone");
 			state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
+			registerObjectiveToFade(FIND_GRAVEYARD_ID);
 			sendCameraToZone(GRAVEYARD_ZONE_ID);
 			pauseAndShowDialog(DIALOG.found_grave_yard);
 		}
@@ -828,6 +863,7 @@ function checkObjectives() {
 			msg("Found both circle sites");
 			pauseAndShowDialog(DIALOG.stone_circle_both_found);
 			state.objectives.setStatus(FIND_STONE_CIRCLES_ID, OStatus.Done);
+			registerObjectiveToFade(FIND_STONE_CIRCLES_ID);
 		}
 	}
 
@@ -838,6 +874,7 @@ function checkObjectives() {
 			sendCameraToZone(PORT_ZONE_ID);
 			pauseAndShowDialog(DIALOG.found_port_site);
 			state.objectives.setStatus(FIND_PORT_SITE_ID, OStatus.Done);
+			registerObjectiveToFade(FIND_PORT_SITE_ID);
 		}
 	}
 
@@ -1023,9 +1060,11 @@ function manageBadEndingObjectives() {
 
 			// Cleanup the sacrifice stuff
 			state.objectives.setStatus(BAD_ENDING_DATA.progressId, OStatus.Done);
+			registerObjectiveToFade(BAD_ENDING_DATA.progressId);
 			state.objectives.setVisible(SHIP_DATA.objId, false);
 			state.objectives.setVisible(SACRIFICE_UNITS_OBJ_ID, false);
 			state.objectives.setStatus(BAD_ENDING_DATA.objectiveId, OStatus.Done);
+			registerObjectiveToFade(BAD_ENDING_DATA.objectiveId);
 
 			pauseAndShowDialog(DIALOG.bad_ending_sacrifices_done);
 
@@ -1040,11 +1079,6 @@ function manageBadEndingObjectives() {
 
 	// PART TWO
 	else if(BAD_ENDING_DATA.currentlyEscaping) {
-
-		// This helps provide a slight delay, so the player sees they completed the objective before it fades
-		if(state.objectives.isVisible(BAD_ENDING_DATA.progressId))
-			state.objectives.setVisible(BAD_ENDING_DATA.progressId, false);
-
 		if(meetsRequirements(BAD_ENDING_DATA.escapeObjResourceRequirements)) {
 			if(human.getWarchief().zone == getZone(PORT_ZONE_ID)) {
 
@@ -1627,8 +1661,8 @@ function setupObjectives() {
 	if(DEBUG.QUICK_BUTTON) {
 		state.objectives.add("QuickComplete", "Complete Next Step", {visible:true}, {name:"Next", action:"quickButtonCallback"});
 	}
-	if(DEBUG.QUICK_GIANTS) {
-		state.objectives.add("QuickGiantsFriendly", "Quick Giants", {visible:true}, {name:"Next", action:"quickGiantsButtonCallback"});
+	if(DEBUG.QUICK_GIANTS || DEBUG.QUICK_GIANTS_BETRAY) {
+		state.objectives.add("QuickGiants", "Quick Giants", {visible:true}, {name:"Next", action:"quickGiantsButtonCallback"});
 	}
 
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
@@ -1659,7 +1693,7 @@ function setupObjectives() {
 
 	// Giants objectives
 	state.objectives.add(GIANT_DATA.attackObjId, GIANT_DATA.attackObjId, {visible:false});
-	state.objectives.add(GIANT_DATA.befriendObjId, GIANT_DATA.befriendObjId, {visible:false}, {name:"Donate", action:"donatedToGiantsCallback"});
+	state.objectives.add(GIANT_DATA.befriendObjId, GIANT_DATA.befriendObjId, {visible:false}, {name:"250 Wood, 300 Food", action:"donatedToGiantsCallback"});
 
 	state.objectives.add(NORTH_ID, "Attack In the North", {visible:false});
 	state.objectives.add(EAST_ID, "Attack In the East", {visible:false});
@@ -1713,11 +1747,28 @@ function quickButtonCallback() {
 	DEBUG.QUICK_BUTTON_INDEX++;
 }
 
+/**
+ * DEBUG FUNCTION
+ *
+ * Used for quickly testing interactions with the giants
+ */
 function quickGiantsButtonCallback() {
-	switch(DEBUG.QUICK_GIANTS_INDEX) {
-		case 0: human.discoverZone(getZone(BRAMBLES_TILE_ID)); debug("Revealed brambles.");
-		case 1: human.addResource(Resource.Wood, 1000); human.addResource(Resource.Food, 1000); debug("Gave resources");
-		default: debug("No more next steps");
+	if(DEBUG.QUICK_GIANTS_BETRAY) {
+		switch(DEBUG.QUICK_GIANTS_INDEX) {
+			case 0: human.discoverZone(getZone(BRAMBLES_TILE_ID)); debug("Revealed brambles.");
+			case 1: human.getWarchief().setPosition(getZone(GIANT_CAMP_TILE_ID).x, getZone(GIANT_CAMP_TILE_ID).y); debug("WC moved to giants");
+			default: debug("No more next steps");
+		}
+	}
+	else if(DEBUG.QUICK_GIANTS) {
+		switch(DEBUG.QUICK_GIANTS_INDEX) {
+			case 0: human.discoverZone(getZone(BRAMBLES_TILE_ID)); debug("Revealed brambles.");
+			case 1: human.addResource(Resource.Wood, 1000); human.addResource(Resource.Food, 1000); debug("Gave resources");
+			default: debug("No more next steps");
+		}
+	}
+	else {
+		debug("No debug option enabled for giants.");
 	}
 
 	DEBUG.QUICK_GIANTS_INDEX++;
