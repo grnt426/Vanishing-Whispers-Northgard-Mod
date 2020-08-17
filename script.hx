@@ -39,7 +39,7 @@ var MYSTERY_ZONE_ID: Int = 8;
 var GRAVEYARD_ZONE_ID: Int = 72;
 var PORT_ZONE_ID: Int = 39;
 var PORT_LAUNCH_ZONE_ID: Int = 20;
-var LORE_CIRCLE_ZONE_IDS = [41, 45];
+var LORE_CIRCLE_ZONE_IDS = [41, 45]; // 41 is Northern circle, 45 is circle next to Kobolds home tile
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
 var BRAMBLES_TILE_ID = 82;
@@ -440,6 +440,10 @@ var DIALOG = {
 		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"We decide. Maybe we allow study stones, but we want more shiny. 175 Krowns, and 5 more Iron."},
 	],
 
+	kobolds_destoyed:[
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Kobolds Destroyed text"}, // placeholder dialog
+	],
+
 	/**
 	 * For the good ending, when dying in battle.
 	 */
@@ -457,14 +461,18 @@ var DIALOG = {
 
 var KOBOLD_DATA = {
 	initialContact: false,
-	tileForInitialContact:BRAMBLES_TILE_ID,
+	tileForInitialContact:LORE_CIRCLE_ZONE_IDS[0], // northern stone circle
 	initialContactDialog:DIALOG.kobolds_initial_contact,
 	donateButtonPressed: false,
+	ownsHomeTile: true,
+	koboldPlayer: null,
 
 	// Betray data
 	enemy: false,
-	attackObjId: "Remove Kobolds From Stone Circles",
+	attackObjId: "Remove Kobolds",
 	firstAttackDialog:DIALOG.kobolds_first_attacked,
+	kobolds_destroyed:DIALOG.kobolds_destoyed,
+	monthOfLastAttack:-1,
 
 	destroyReward:[{res:Resource.Money, amt:1000}, {res:Resource.Lore, amt:150}, {res:Resource.Stone, amt:5}, {res:Resource.Iron, amt:20}],
 
@@ -655,9 +663,9 @@ function onFirstLaunch() {
 	SPIRIT_DATA.attackData.pop();
 
 	// Only one Jotnar should be on the Jotunn camp
-	// we concat to an empty array so we can freely kill the unit, as the original
-	// array gets modified by the game engine when a unit dies
 	GIANT_DATA.loneGiant = getZone(GIANT_CAMP_TILE_ID).units[0];
+
+	KOBOLD_DATA.koboldPlayer = getZone(KOBOLD_HOME_TILE_ID).owner;
 
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
@@ -771,6 +779,111 @@ function registerObjectiveToFade(id:String) {
  */
 function checkKobolds() {
 
+	if(!KOBOLD_DATA.initialContact) {
+		if(human.hasDiscovered(getZone(KOBOLD_DATA.tileForInitialContact))) {
+			KOBOLD_DATA.initialContact = true;
+			human.discoverZone(getZone(KOBOLD_HOME_TILE_ID));
+			sendCameraToZone(KOBOLD_HOME_TILE_ID);
+			pauseAndShowDialog(KOBOLD_DATA.initialContactDialog);
+
+			state.objectives.setVisible(KOBOLD_DATA.befriendObjId, true);
+			state.objectives.setVisible(KOBOLD_DATA.attackObjId, true);
+		}
+	}
+	else if(!KOBOLD_DATA.enemy) {
+
+		// Anything other than the kobolds is considered an attack against them.
+		var units = getZone(KOBOLD_HOME_TILE_ID).units;
+		if(units.length > 1) {
+			for(u in units) {
+				if(u.isMilitary && u.owner == human) {
+					KOBOLD_DATA.enemy = true;
+					pauseAndShowDialog(KOBOLD_DATA.firstAttackDialog);
+
+					// TODO: what should happen if the player betrays the kobolds?
+					if(KOBOLD_DATA.befriended) {
+
+					}
+					else {
+						state.objectives.setStatus(KOBOLD_DATA.befriendObjId, OStatus.Missed);
+						registerObjectiveToFade(KOBOLD_DATA.befriendObjId);
+					}
+					break;
+				}
+			}
+		}
+	}
+
+	if(KOBOLD_DATA.enemy && KOBOLD_DATA.ownsHomeTile) {
+
+		// Check if the kobolds have been removed
+		if(getZone(KOBOLD_HOME_TILE_ID).owner != KOBOLD_DATA.koboldPlayer) {
+			KOBOLD_DATA.ownsHomeTile = false;
+			state.objectives.setStatus(KOBOLD_DATA.attackObjId, OStatus.Done);
+			registerObjectiveToFade(KOBOLD_DATA.attackObjId);
+
+			// What should happen after the betrayal is complete?
+			if(KOBOLD_DATA.befriended) {
+
+			}
+			else {
+				giveResources(KOBOLD_DATA.destroyReward);
+				pauseAndShowDialog(KOBOLD_DATA.kobolds_destroyed);
+
+				addFoes([{z:KOBOLD_HOME_TILE_ID, u:Unit.SpecterWarrior, nb:5}]);
+			}
+		}
+
+		// Otherwise, we continually send attacks from the hometile
+		else {
+			if(KOBOLD_DATA.monthOfLastAttack == -1) {
+				KOBOLD_DATA.monthOfLastAttack = convertTimeToMonth(state.time);
+			}
+
+			/*
+				Months are represented 0 -> 11, where March = 0. First, we add one to avoid zero-indexing so the range is 1 -> 12.
+				If we want to send attacks every 3 months, we will need to handle the wrap around case where
+				the last month was 12, and the current is 3
+				In that example, 3 - 12 = -15, and -15 % 12 = -3, and abs(-3) = 3.
+				This assumes the modulo of a negative number in Haxe returns a negative number. If not, then
+				the abs is unnecessary but harmless
+			*/
+			if(abs((convertTimeToMonth(state.time) + 1 - KOBOLD_DATA.monthOfLastAttack + 1) % 12) > 2) {
+				KOBOLD_DATA.monthOfLastAttack = convertTimeToMonth(state.time);
+				var koboldCount = 2 + timeToYears(state.time);
+				addFoes([{z:KOBOLD_HOME_TILE_ID, u:Unit.Kobold, nb:koboldCount}]);
+				var kobolds = getZone(KOBOLD_HOME_TILE_ID).units.slice(0, koboldCount);
+				launchAttackPlayer(kobolds, human);
+			}
+		}
+	}
+	else if(KOBOLD_DATA.donateButtonPressed) {
+		if(!meetsRequirements(KOBOLD_DATA.bribeResourcesRequired) && !meetsRequirements(KOBOLD_DATA.befriendResourcesRequired)) {
+			msg("Does not have enough resources.");
+			KOBOLD_DATA.donateButtonPressed = false;
+		}
+		if(canSendDialogThisUpdate()) {
+			KOBOLD_DATA.donateButtonPressed = false;
+
+			if(!KOBOLD_DATA.bribed) {
+				takeResources(KOBOLD_DATA.bribeResourcesRequired);
+				KOBOLD_DATA.bribed = true;
+				state.objectives.setVisible(KOBOLD_DATA.bribeObjId, false);
+				pauseAndShowDialog(KOBOLD_DATA.bribedDialog);
+			}
+			else {
+				takeResources(KOBOLD_DATA.befriendResourcesRequired);
+				KOBOLD_DATA.befriended = true;
+				state.objectives.setVisible(KOBOLD_DATA.befriendObjId, false);
+				pauseAndShowDialog(KOBOLD_DATA.bribedDialog);
+				giveResources(KOBOLD_DATA.befriendReward);
+				state.objectives.setVisible(KOBOLD_DATA.attackObjId, false);
+
+
+				// TODO remove kobolds from tiles
+			}
+		}
+	}
 }
 
 /**
@@ -801,7 +914,7 @@ function checkGiants() {
 		var units = getZone(GIANT_CAMP_TILE_ID).units;
 		if(units.length > 1) {
 			for(u in units) {
-				if(u.isMilitary) {
+				if(u.isMilitary && u.owner == human) {
 					GIANT_DATA.enemy = true;
 					pauseAndShowDialog(GIANT_DATA.firstAttackDialog);
 
@@ -843,12 +956,10 @@ function checkGiants() {
 			}
 		}
 	}
-
-	if(GIANT_DATA.donateButtonPressed) {
-
-		// This is a guard in case the button was pressed at the same time they betrayed the giants
-		if(GIANT_DATA.enemy) {
+	else if(GIANT_DATA.donateButtonPressed) {
+		if(!meetsRequirements(GIANT_DATA.befriendResourcesRequired)){
 			GIANT_DATA.donateButtonPressed = false;
+			msg("Not enough resources");
 		}
 		else if(canSendDialogThisUpdate()) {
 			GIANT_DATA.donateButtonPressed = false;
@@ -1554,6 +1665,13 @@ function getPreparedObjective(index:Int):{id:String, name:String} {
  */
 function timeToYears(time:Float):Int {
 	return toInt(time / 720.0);
+}
+
+/**
+ * Given a time, will return what month we are in, where 0 = March and 12 = February
+ */
+function convertTimeToMonth(time:Float) {
+	return toInt(time % 720 / 60);
 }
 
 /**
