@@ -32,6 +32,10 @@ DEBUG = {
 	QUICK_GIANTS:false,
 	QUICK_GIANTS_INDEX:0,
 	QUICK_GIANTS_BETRAY:false,
+
+	QUICK_KOBOLDS:true,
+	QUICK_KOBOLDS_INDEX:0,
+	QUICK_KOBOLDS_BETRAY:false,
 }
 
 var START_ZONE_ID: Int = 65;
@@ -483,9 +487,12 @@ var KOBOLD_DATA = {
 	bribed:false,
 	bribeObjId:"Bribe the Kobolds",
 	bribeDecisionDelay:90, // time in seconds the Kobolds take to change their minds about the player
+	timeOfBribe:0.0,
 	bribedDialog:DIALOG.kobolds_bribed,
+	waitBribeDecisionObjId:"Wait for your bribe to work",
 	bribeResourcesRequired:[{res:Resource.Iron, amt:10}],
 
+	demandMade: false,
 	demandMoreShinyDialog:DIALOG.kobolds_demand_shiny,
 	befriendedDialog:DIALOG.kobolds_befriended,
 	befriendReward:[{res:Resource.Lore, amt:400}],
@@ -870,6 +877,8 @@ function checkKobolds() {
 				KOBOLD_DATA.bribed = true;
 				state.objectives.setVisible(KOBOLD_DATA.bribeObjId, false);
 				pauseAndShowDialog(KOBOLD_DATA.bribedDialog);
+				KOBOLD_DATA.timeOfBribe = state.time;
+				state.objectives.setVisible(KOBOLD_DATA.waitBribeDecisionObjId, true);
 			}
 			else {
 				takeResources(KOBOLD_DATA.befriendResourcesRequired);
@@ -882,6 +891,15 @@ function checkKobolds() {
 
 				// TODO remove kobolds from tiles
 			}
+		}
+	}
+
+	if(!KOBOLD_DATA.demandMade && KOBOLD_DATA.bribed && KOBOLD_DATA.timeOfBribe + KOBOLD_DATA.bribeDecisionDelay < state.time) {
+		if(canSendDialogThisUpdate()) {
+			KOBOLD_DATA.demandMade = true;
+			state.objectives.setVisible(KOBOLD_DATA.befriendObjId, true);
+			registerObjectiveToFade(KOBOLD_DATA.waitBribeDecisionObjId);
+			pauseAndShowDialog(KOBOLD_DATA.demandMoreShinyDialog);
 		}
 	}
 }
@@ -1866,6 +1884,7 @@ function setupObjectives() {
 	// Kobolds objectives
 	state.objectives.add(KOBOLD_DATA.attackObjId, KOBOLD_DATA.attackObjId, {visible:false});
 	state.objectives.add(KOBOLD_DATA.bribeObjId, KOBOLD_DATA.bribeObjId, {visible:false}, {name:"10 Iron", action:"donatedToKoboldsCallback"});
+	state.objectives.add(KOBOLD_DATA.waitBribeDecisionObjId, KOBOLD_DATA.waitBribeDecisionObjId, {visible:false});
 	state.objectives.add(KOBOLD_DATA.befriendObjId, KOBOLD_DATA.befriendObjId, {visible:false}, {name:"175 Krowns, 5 Iron", action:"donatedToKoboldsCallback"});
 
 	state.objectives.add(NORTH_ID, "Attack In the North", {visible:false});
@@ -1945,4 +1964,21 @@ function quickGiantsButtonCallback() {
 	}
 
 	DEBUG.QUICK_GIANTS_INDEX++;
+}
+
+function quickKoboldsButtonCallback() {
+	if(DEBUG.QUICK_KOBOLDS) {
+		switch(DEBUG.QUICK_KOBOLDS_INDEX) {
+			case 0: human.discoverZone(getZone(LORE_CIRCLE_ZONE_IDS[0])); debug("Discovered first lore circle");
+			case 1: human.addResource(Resource.Iron, 10); debug("Added resources");
+			case 2: KOBOLD_DATA.timeOfBribe = 0; debug("Put bribe time far in the past");
+			case 3: human.addResource(Resource.Iron, 5); human.addResource(Resource.Money, 175); debug("Added resources");
+			default: debug("No more next steps");
+		}
+	}
+	else {
+		debug("No debug option enabled for kobolds.");
+	}
+
+	DEBUG.QUICK_KOBOLDS_INDEX++;
 }
