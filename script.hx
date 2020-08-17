@@ -416,6 +416,30 @@ var DIALOG = {
 		{option:{who:Banner.Giant1, name:"Lone Giant"}, text:"You are filth, just like the ones before you. With my dying breath, a curse upon your clan!"},
 	],
 
+	kobolds_initial_contact:[
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"EEEEeeeek! Humans, why you on this island? We no want you here and spirits won't let you leave. We want peace!"},
+		{option:{who:Banner.BannerBoar, name:"Svarn"}, text:"We are trying to learn the history, though simply getting off the island is becoming a higher priority."},
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"You leave us alone, we guard knowledge they left behind."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Svarn, maybe we could convince them to let us access some of the knowledge? I heard Kobolds like shiny things."},
+	],
+
+	kobolds_first_attacked:[
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"We not allow ourselves be exploited by Humans again for island, we will defend our lands!"},
+	],
+
+	kobolds_befriended:[
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"You off island, we safer. You may study stones for runes. But no more!"},
+	],
+
+	kobolds_bribed:[
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"This iron very shiny. Hmmmm, we think more about you. Come back later, we decide then."},
+		{option:{who:Banner.BannerGoat, name:"Halvard"}, text:"Hopefully they don't take too long to decide. These spirits are relentless."},
+	],
+
+	kobolds_demand_shiny:[
+		{option:{who:Banner.Kobold, name:"Kobolds"}, text:"We decide. Maybe we allow study stones, but we want more shiny. 175 Krowns, and 5 more Iron."},
+	],
+
 	/**
 	 * For the good ending, when dying in battle.
 	 */
@@ -432,10 +456,32 @@ var DIALOG = {
 };
 
 var KOBOLD_DATA = {
-	befriended: false,
-	enemy: false,
 	initialContact: false,
-	attackObjId: "Remove the Kobolds",
+	tileForInitialContact:BRAMBLES_TILE_ID,
+	initialContactDialog:DIALOG.kobolds_initial_contact,
+	donateButtonPressed: false,
+
+	// Betray data
+	enemy: false,
+	attackObjId: "Remove Kobolds From Stone Circles",
+	firstAttackDialog:DIALOG.kobolds_first_attacked,
+
+	destroyReward:[{res:Resource.Money, amt:1000}, {res:Resource.Lore, amt:150}, {res:Resource.Stone, amt:5}, {res:Resource.Iron, amt:20}],
+
+	// Befriend data
+	befriended: false,
+	befriendObjId: "Fulfill Their Demand",
+
+	bribed:false,
+	bribeObjId:"Bribe the Kobolds",
+	bribeDecisionDelay:90, // time in seconds the Kobolds take to change their minds about the player
+	bribedDialog:DIALOG.kobolds_bribed,
+	bribeResourcesRequired:[{res:Resource.Iron, amt:10}],
+
+	demandMoreShinyDialog:DIALOG.kobolds_demand_shiny,
+	befriendedDialog:DIALOG.kobolds_befriended,
+	befriendReward:[{res:Resource.Lore, amt:400}],
+	befriendResourcesRequired:[{res:Resource.Money, amt:175}, {res:Resource.Iron, amt:5}],
 };
 
 var GIANT_DATA = {
@@ -1552,6 +1598,10 @@ function donatedToGiantsCallback() {
 	GIANT_DATA.donateButtonPressed = true;
 }
 
+function donatedToKoboldsCallback() {
+	KOBOLD_DATA.donateButtonPressed = true;
+}
+
 /**
  * Given an array of resources structs {Resource, Int}, will return True if the player has all the resources
  */
@@ -1694,6 +1744,11 @@ function setupObjectives() {
 	// Giants objectives
 	state.objectives.add(GIANT_DATA.attackObjId, GIANT_DATA.attackObjId, {visible:false});
 	state.objectives.add(GIANT_DATA.befriendObjId, GIANT_DATA.befriendObjId, {visible:false}, {name:"250 Wood, 300 Food", action:"donatedToGiantsCallback"});
+
+	// Kobolds objectives
+	state.objectives.add(KOBOLD_DATA.attackObjId, KOBOLD_DATA.attackObjId, {visible:false});
+	state.objectives.add(KOBOLD_DATA.bribeObjId, KOBOLD_DATA.bribeObjId, {visible:false}, {name:"10 Iron", action:"donatedToKoboldsCallback"});
+	state.objectives.add(KOBOLD_DATA.befriendObjId, KOBOLD_DATA.befriendObjId, {visible:false}, {name:"175 Krowns, 5 Iron", action:"donatedToKoboldsCallback"});
 
 	state.objectives.add(NORTH_ID, "Attack In the North", {visible:false});
 	state.objectives.add(EAST_ID, "Attack In the East", {visible:false});
