@@ -3,8 +3,12 @@
  * 			Drage Ander Island
  * 			Dragon Spirits Island
  *
- * The player must discover the secrets of the island before the island is consumed by spirits.
- * What choices will you make? Can you discover all three endings?
+ * The player must discover the secrets of the
+ * island before the island is consumed by spirits.
+ * What choices will you make? Can you discover
+ * all three endings?
+ *
+ * Read the README.md for more.
  * ================================================
  */
 
@@ -43,7 +47,7 @@ var MYSTERY_ZONE_ID: Int = 8;
 var GRAVEYARD_ZONE_ID: Int = 72;
 var PORT_ZONE_ID: Int = 39;
 var PORT_LAUNCH_ZONE_ID: Int = 20;
-var LORE_CIRCLE_ZONE_IDS = [41, 45]; // 41 is Northern circle, 45 is circle next to Kobolds home tile
+var LORE_CIRCLE_ZONE_IDS = [41, 45]; // 41 is Northern circle, 45 is southern stone circle. DO NOT CHANGE ORDERING
 var KOBOLD_HOME_TILE_ID: Int = 53;
 var STARTER_CARVED_STONE_TILE_ID: Int = 76;
 var BRAMBLES_TILE_ID = 82;
@@ -57,6 +61,8 @@ var GIANT_CAMP_TILE_ID = 74;
  * 74 - Jotunn camp
  *
  * All other zones are capturable by the spirits, and once captured, lost forever.
+ *
+ * TODO: Spirits can only attack zones they will capture
  */
 var SAFE_ZONES = [START_ZONE_ID, 66, 60, 53, GIANT_CAMP_TILE_ID];
 
