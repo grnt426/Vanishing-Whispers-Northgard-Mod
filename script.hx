@@ -26,14 +26,14 @@ DEBUG = {
 
 	TIME_INDEX:0,
 
-	QUICK_BUTTON:false,
+	QUICK_BUTTON:true,
 	QUICK_BUTTON_INDEX:0,
 
 	QUICK_GIANTS:false,
 	QUICK_GIANTS_INDEX:0,
 	QUICK_GIANTS_BETRAY:false,
 
-	QUICK_KOBOLDS:true,
+	QUICK_KOBOLDS:false,
 	QUICK_KOBOLDS_INDEX:0,
 	QUICK_KOBOLDS_BETRAY:false,
 }
@@ -788,13 +788,16 @@ function checkKobolds() {
 
 	if(!KOBOLD_DATA.initialContact) {
 		if(human.hasDiscovered(getZone(KOBOLD_DATA.tileForInitialContact))) {
-			KOBOLD_DATA.initialContact = true;
-			human.discoverZone(getZone(KOBOLD_HOME_TILE_ID));
-			sendCameraToZone(KOBOLD_HOME_TILE_ID);
-			pauseAndShowDialog(KOBOLD_DATA.initialContactDialog);
+			if(canSendDialogThisUpdate()) {
+				msg("Initial kobold contact");
+				KOBOLD_DATA.initialContact = true;
+				human.discoverZone(getZone(KOBOLD_HOME_TILE_ID));
+				sendCameraToZone(KOBOLD_HOME_TILE_ID);
+				pauseAndShowDialog(KOBOLD_DATA.initialContactDialog);
 
-			state.objectives.setVisible(KOBOLD_DATA.befriendObjId, true);
-			state.objectives.setVisible(KOBOLD_DATA.attackObjId, true);
+				state.objectives.setVisible(KOBOLD_DATA.bribeObjId, true);
+				state.objectives.setVisible(KOBOLD_DATA.attackObjId, true);
+			}
 		}
 	}
 	else if(!KOBOLD_DATA.enemy) {
@@ -1849,6 +1852,9 @@ function setupObjectives() {
 	}
 	if(DEBUG.QUICK_GIANTS || DEBUG.QUICK_GIANTS_BETRAY) {
 		state.objectives.add("QuickGiants", "Quick Giants", {visible:true}, {name:"Next", action:"quickGiantsButtonCallback"});
+	}
+	if(DEBUG.QUICK_KOBOLDS || DEBUG.QUICK_KOBOLDS_BETRAY) {
+		state.objectives.add("QuickKobolds", "Quick Kobolds", {visible:true}, {name:"Next", action:"quickKoboldsButtonCallback"});
 	}
 
 	state.objectives.add(PRIMARY_OBJ_ID, "Discover the Secret of the Isle", {visible:false});
