@@ -842,9 +842,6 @@ function hasScenePlayed(scene) : Bool {
  * Manages playing scenes one at a time with a small delay between them.
  *
  * Keeps Q_DIALOG and DQ_DIALOG updated.
- *
- * TODO: Should we only use the first line of dialog as a "cache" of played
- * scenes to reduce memory usage? DQ_DIALOG is kind of a memory leak for lots of dialog.
  */
 function playScenes() {
 	if(Q_DIALOG.length == 0 || timeOfLastScene + 3 > state.time)
@@ -857,7 +854,7 @@ function playScenes() {
 	var scene = Q_DIALOG.shift();
 
 	msg("Playing scene");
-	if(scene.cam != CAMERA_PLACEHOLDER) {
+	if(scene.cam != null) {
 		moveCamera({x:scene.cam.x, y:scene.cam.y});
 		if(scene.cam.zoom >= 0)
 			setZoom(scene.cam.zoom);
@@ -1414,16 +1411,15 @@ function checkDialog() {
 		var scene = createScene(DIALOG.opening, null);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Opening dialog shown");
-			pauseAndShowDialog(DIALOG.opening);
 			DIALOG.opening = [];
 			state.objectives.setVisible(FIND_STARTING_STONE_ID, true);
 		}
 	}
 
 	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 3) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.initial_explore, null);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Initial explore dialog shown");
-			pauseAndShowDialog(DIALOG.initial_explore);
 			state.objectives.setVisible(PRIMARY_OBJ_ID, true);
 			DIALOG.initial_explore = [];
 		}
@@ -1927,8 +1923,10 @@ function pauseAndShowDialog(dialog) {
 
 	// The checkStudying function may pass in empty dialog, which is fine,
 	// we just don't want to pause and unpause unnecessarily.
-	if(dialog.length == 0)
+	if(dialog.length == 0) {
+		msg("Dialog empty??");
 		return;
+	}
 
 	dialogShownRecentlyLock = 5;
 	if(!DIALOG_SUPPRESSED) {
