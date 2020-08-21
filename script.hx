@@ -8,7 +8,11 @@
  * What choices will you make? Can you discover
  * all three endings?
  *
- * Read the README.md for more.
+ * NOTE: this map was made with the Beta editor when
+ * it had far less features and APIs. It is crude, but
+ * that was the best I could do with so few tools.
+ *
+ * Read the README.md for more information.
  * ================================================
  */
 
