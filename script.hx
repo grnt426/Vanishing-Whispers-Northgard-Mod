@@ -250,24 +250,63 @@ var SPIRIT_DATA = {
 	],
 };
 
+var CAMERA_PLACEHOLDER = {x:0.0, y:0.0, zoom:0.0};
+var DIALOG_PLACEHOLDER = [{option:{who:Banner.BannerBoar, name:"PLACE"}, text:"HOLDER"}];
+
+/**
+ * Used to indicate the type to Haxe for the Q_DIALOG list
+ */
+var SCENE_PLACEHOLDER = {cam:CAMERA_PLACEHOLDER, dialog:DIALOG_PLACEHOLDER};
+
+/**
+ * Used to queue dialog and cinematics.
+ *
+ * This prevents dialog and cinematics from cluttering on top of each other when multiple
+ * happen at the same time, and also acts as a single way to control how dialog is shown
+ * to the user and the corresponding camera effects in one place.
+ *
+ * The biggest reason this exists however is to solve problems with the script running
+ * concurrently with itself when pause() is called. The script can be executed many more
+ * times after that function call, which itself is blocking, so we can't guarantee that
+ * two calls to pauseAndShowDialog won't cause problems and duplicate or triplicate the dialog
+ * a player sees.
+ *
+ * Therefore, ALL dialog MUST be pushed into this queue through the enqueueScene function.
+ *
+ * Treated as a Queue data structure (push and shift only for writes).
+ */
+var Q_DIALOG = [
+	SCENE_PLACEHOLDER,
+];
+
+/**
+ * Used to quickly look up if a scene is in the Q_DIALOG based on string.
+ */
+var Q_DIALOG_LOOKUP = [];
+
+/**
+ * Tracks what scenes have already been played.
+ *
+ * This is needed because sometimes we don't want objectives to change, resources to change,
+ * or more until we know the scene has been shown. This allows us to make scenes a polling/blocking
+ * operation for in game effects.
+ */
+var DQ_DIALOG = ["PLACEHOLDER"];
+
+/**
+ * The game time when the last scene was played, in seconds.
+ *
+ * Helps make sure scenes play one after the other only after some delay to
+ * prevent immediate playing of the next.
+ */
+var timeOfLastScene = 0.0;
+
 /**
  * All the dialog used in the cutscenes
  *
  * A good chunk of the first few missions/actions in the game is here. However, much is missing.
  * The dialog itself is also a rush job to get a feel for how it would it would sound and feel in game,
  * and needs substantial editing and rewriting.
- *
- * MISSING:
- * Dialog when a ghost first takes a tile
- * Dialog for kobold quest
- * 		Good ending
- *  	Neutral/bad ending
- * Dialog for giant quest
- *  	Good ending
- *  	Bad ending
- * Dialog for sacrifices
- * 		Perhaps dialog after first sacrifices
- * dialog for escaping/winning
  *
  * entirety of neutral
  * entirety of good
@@ -676,6 +715,8 @@ function onFirstLaunch() {
 
 	msg("Checking debug data setup");
 
+	Q_DIALOG.shift();
+
 	// Clean up type data placeholders
 	SPIRIT_DATA.attackData.pop();
 
@@ -746,11 +787,85 @@ function regularUpdate(dt : Float) {
 		checkEndGame(),
 
 		fadeObjectives(),
+
+		playScenes(),
 	];
 
 	if(toInt(DEBUG.TIME_INDEX) % 30 == 0)
 		msg("running...");
 }
+
+function createScene(dialog = DIALOG_PLACEHOLDER, camera = CAMERA_PLACEHOLDER) {
+	return {cam:camera, dialog:dialog};
+}
+
+/**
+ * Setups the given scene for playing.
+ */
+function enqueueScene(scene) {
+	if(isSceneEnqueued(scene))
+		return;
+
+	Q_DIALOG.push(scene);
+	Q_DIALOG_LOOKUP.push(scene.dialog[0].text);
+}
+
+/**
+ * Can be used to prevent a block of code from executing until the
+ * scene the given scene has been played. This can be called without
+ * calling enqueueScene first as it will enqueue the scene if not already.
+ */
+function pollSceneUntilPlayed(scene) : Bool {
+	if(isSceneEnqueued(scene)) {
+		return hasScenePlayed(scene);
+	}
+	enqueueScene(scene);
+	msg("Scene enqueued");
+	return false;
+}
+
+/**
+ * Checks if a scene is either awaiting to be played, or has been played.
+ */
+function isSceneEnqueued(scene) : Bool {
+	return Q_DIALOG_LOOKUP.indexOf(scene.dialog[0].text) != -1 || DQ_DIALOG.indexOf(scene.dialog[0].text) != -1;
+}
+
+/**
+ * Checks if a scene has been played.
+ */
+function hasScenePlayed(scene) : Bool {
+	return DQ_DIALOG.indexOf(scene.dialog[0].text) != -1;
+}
+
+/**
+ * Manages playing scenes one at a time with a small delay between them.
+ *
+ * Keeps Q_DIALOG and DQ_DIALOG updated.
+ *
+ * TODO: Should we only use the first line of dialog as a "cache" of played
+ * scenes to reduce memory usage? DQ_DIALOG is kind of a memory leak for lots of dialog.
+ */
+function playScenes() {
+	if(Q_DIALOG.length == 0 || timeOfLastScene + 3 > state.time)
+		return;
+	timeOfLastScene = state.time;
+
+	// We push into DQ_DIALOG first just to make sure a race condition doesn't happen
+	// and a scene is double-inserted
+	DQ_DIALOG.push(Q_DIALOG_LOOKUP.shift());
+	var scene = Q_DIALOG.shift();
+
+	msg("Playing scene");
+	if(scene.cam != CAMERA_PLACEHOLDER) {
+		moveCamera({x:scene.cam.x, y:scene.cam.y});
+		if(scene.cam.zoom >= 0)
+			setZoom(scene.cam.zoom);
+	}
+
+	pauseAndShowDialog(scene.dialog);
+}
+
 
 /**
  * This triggers the Game end victory/defeat for the player; showing the shining or broken shield, and allowing the player to quit.
@@ -1296,7 +1411,8 @@ function manageBadEndingObjectives() {
  */
 function checkDialog() {
 	if(DIALOG.opening.length > 0 && TIME_TO_OPENING_DIALOG < state.time) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.opening, null);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Opening dialog shown");
 			pauseAndShowDialog(DIALOG.opening);
 			DIALOG.opening = [];
