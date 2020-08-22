@@ -1278,6 +1278,11 @@ function findBuildingInZone(id:Int, type:BuildingKind) {
 	return null;
 }
 
+function createCameraToZone(id:Int, zoom:Float) {
+	var zone = getZone(id);
+	return {x:zone.x, y:zone.y, zoom:zoom};
+}
+
 function sendCameraToZone(id:Int) {
 	var zone = getZone(id);
 	moveCamera({x:zone.x, y:zone.y});
@@ -1426,28 +1431,29 @@ function checkDialog() {
 	}
 
 	if(DIALOG.spirit_appears.length > 0 && human.discovered.length == 5) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.spirit_appears, null);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirit Appears dialog shown");
-			pauseAndShowDialog(DIALOG.spirit_appears);
 			DIALOG.spirit_appears = [];
 		}
 	}
 
 	if(SPIRIT_DATA.firstTileTaken && LOST_ZONES.length >= 1) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.ghosts_take_first_tile, createCameraToZone(LOST_ZONES[0], -1));
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirits took first tile dialog shown");
-			var zone = getZone(LOST_ZONES[0]);
-			moveCamera({x:zone.x, y:zone.y});
-			pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
+			// var zone = getZone(LOST_ZONES[0]);
+			// moveCamera({x:zone.x, y:zone.y});
+			// pauseAndShowDialog(DIALOG.ghosts_take_first_tile);
 			DIALOG.ghosts_take_first_tile = [];
 			SPIRIT_DATA.firstTileTaken = false;
 		}
 	}
 
 	if(!state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId) && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.ghosts_take_many_tiles, null);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirit defeat countdown triggered");
-			pauseAndShowDialog(DIALOG.ghosts_take_many_tiles);
 			DIALOG.ghosts_take_many_tiles = [];
 			state.objectives.setVisible(SPIRIT_DATA.tilesLostRemainingObjId, true);
 		}
