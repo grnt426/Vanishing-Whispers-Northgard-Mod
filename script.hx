@@ -26,7 +26,7 @@ var VERSION = "1.5";
 DEBUG = {
 	SKIP_STUDYING: false,
 	MESSAGES: true,
-	SPIRITS_FAST: false,
+	SPIRITS_FAST: true,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
@@ -34,7 +34,7 @@ DEBUG = {
 
 	TIME_INDEX:0,
 
-	QUICK_BUTTON:true,
+	QUICK_BUTTON:false,
 	QUICK_BUTTON_INDEX:0,
 
 	QUICK_GIANTS:false,
@@ -108,9 +108,9 @@ var WARCHIEF_ALIVE_OBJ_ID = "warchiefaliveID";
 var warchiefUnit:Unit;
 var NONE_FORMAT = "NONE";
 
-var DIALOG_SUPPRESS_ID = "dialogsuppressid";
-var DIALOG_SUPPRESSED:Bool = false; // The player can choose to skip the dialog in the opening. This makes replays less annoying
-var DIALOG_SUPPRESSED_TIMEOUT:Int = 60;
+// var DIALOG_SUPPRESS_ID = "dialogsuppressid";
+// var DIALOG_SUPPRESSED:Bool = false; // The player can choose to skip the dialog in the opening. This makes replays less annoying
+// var DIALOG_SUPPRESSED_TIMEOUT:Int = 60;
 
 var TIME_TO_OPENING_DIALOG:Int = 7;
 
@@ -250,13 +250,13 @@ var SPIRIT_DATA = {
 	],
 };
 
-var CAMERA_PLACEHOLDER = {x:0.0, y:0.0, zoom:0.0};
+var CAMERA_PLACEHOLDER = {x:0.0, y:0.0, zoom:0.0, zone:0};
 var DIALOG_PLACEHOLDER = [{option:{who:Banner.BannerBoar, name:"PLACE"}, text:"HOLDER"}];
 
 /**
  * Used to indicate the type to Haxe for the Q_DIALOG list
  */
-var SCENE_PLACEHOLDER = {cam:CAMERA_PLACEHOLDER, dialog:DIALOG_PLACEHOLDER};
+var SCENE_PLACEHOLDER = {cam:CAMERA_PLACEHOLDER, dialog:DIALOG_PLACEHOLDER, revealTile:true};
 
 /**
  * Used to queue dialog and cinematics.
@@ -692,6 +692,22 @@ function init() {
 }
 
 function onFirstLaunch() {
+	state.objectives.summary = "Discover the secret of the island";
+	state.objectives.title = "Vanishing Whispers";
+
+	state.scriptDesc =
+		"<p align='center'><font face='BigTitle'>Vanishing Whispers</font></p>"
+		+ "<p>"
+			+ "<b>Svarn and Halvard</b> have arrived at an island with both a mysterious legend: no one has seen or been to this island "
+			+ "for as long as anyone can remember. Its name, <b>Drage Ander</b>, simply means 'Dragon Island'. But the Dragon Clan has "
+			+ "never claimed the island for themselves, and they say their own history doesn't include that island in their maps."
+		+ "</p>"
+		+ "<p>"
+			+ "Whomever lived on the island really didn't want anyone visiting, and that is the reason you are here "
+			+ "today. Can you discover the secret of the island? Why was is abandoned, and who abandoned it? Could the Kobolds and the Giants "
+			+ "know anything? And why do you have the feeling that <i>something...doesn't want you here?</i>"
+		+ "</p>"
+	;
 
 	state.removeVictory(VictoryKind.VMoney);
     state.removeVictory(VictoryKind.VFame);
@@ -725,6 +741,8 @@ function onFirstLaunch() {
 
 	KOBOLD_DATA.koboldPlayer = getZone(KOBOLD_HOME_TILE_ID).owner;
 
+	human.genericNotify("Check the mods section under the Victory window for information!");
+
 	// ---- TESTING FOR BAD ENDING
 	if(DEBUG.BAD) {
 		human.addResource(Resource.Wood, 1000);
@@ -751,7 +769,6 @@ function onFirstLaunch() {
 	// Really amps up the attacks for testing
 	if(DEBUG.SPIRITS_FAST) {
 		SPIRIT_DATA.timeToFirstAttackSeconds = 20;
-		human.discoverAll();
 		SPIRIT_DATA.timeofLastAttackSent = 10.0;
 		SPIRIT_DATA.warningBetweenAttacksSeconds = 10;
 		SPIRIT_DATA.warningBetweenAttacksMinimum = 10;
@@ -795,8 +812,8 @@ function regularUpdate(dt : Float) {
 		msg("running...");
 }
 
-function createScene(dialog = DIALOG_PLACEHOLDER, camera = CAMERA_PLACEHOLDER) {
-	return {cam:camera, dialog:dialog};
+function createScene(dialog = DIALOG_PLACEHOLDER, camera = CAMERA_PLACEHOLDER, revealTile) {
+	return {cam:camera, dialog:dialog, revealTile:revealTile};
 }
 
 /**
@@ -812,7 +829,7 @@ function enqueueScene(scene) {
 
 /**
  * Can be used to prevent a block of code from executing until the
- * scene the given scene has been played. This can be called without
+ * given scene has been played. This can be called without
  * calling enqueueScene first as it will enqueue the scene if not already.
  */
 function pollSceneUntilPlayed(scene) : Bool {
@@ -844,8 +861,10 @@ function hasScenePlayed(scene) : Bool {
  * Keeps Q_DIALOG and DQ_DIALOG updated.
  */
 function playScenes() {
-	if(Q_DIALOG.length == 0 || timeOfLastScene + 3 > state.time)
+	// msg("[Queue state] Length: " + Q_DIALOG.length + " Last Scene: " + timeOfLastScene + " Cur time: " + state.time);
+	if(Q_DIALOG.length == 0 || timeOfLastScene + 3 > state.time) {
 		return;
+	}
 	timeOfLastScene = state.time;
 
 	// We push into DQ_DIALOG first just to make sure a race condition doesn't happen
@@ -855,6 +874,8 @@ function playScenes() {
 
 	msg("Playing scene");
 	if(scene.cam != null) {
+		if(scene.revealTile && !human.hasDiscovered(getZone(scene.cam.zone)))
+			human.discoverZone(getZone(scene.cam.zone));
 		moveCamera({x:scene.cam.x, y:scene.cam.y});
 		if(scene.cam.zoom >= 0)
 			setZoom(scene.cam.zoom);
@@ -886,6 +907,9 @@ function checkEndGame() {
  * Handles fading objectives over time.
  */
 function fadeObjectives() {
+	if(fadeObjectiveVisibility.length == 0)
+		return;
+
 	var obj = fadeObjectiveVisibility[0];
 	while(obj.time + 15 < state.time) {
 		fadeObjectiveVisibility.shift();
@@ -1038,11 +1062,14 @@ function checkKobolds() {
 function checkGiants() {
 	if(!GIANT_DATA.initialContact) {
 		if(human.hasDiscovered(getZone(GIANT_DATA.tileForInitialContact))) {
-			if(canSendDialogThisUpdate()) {
+			msg("Enqueuing scene for finding giant");
+			var scene = createScene(GIANT_DATA.initialContactDialog, createCameraToZone(GIANT_CAMP_TILE_ID, -1), true);
+			if(pollSceneUntilPlayed(scene)) {
+				msg("Scene played, showing objectives");
 				GIANT_DATA.initialContact = true;
-				human.discoverZone(getZone(GIANT_CAMP_TILE_ID));
-				sendCameraToZone(GIANT_CAMP_TILE_ID);
-				pauseAndShowDialog(GIANT_DATA.initialContactDialog);
+				// human.discoverZone(getZone(GIANT_CAMP_TILE_ID));
+				// sendCameraToZone(GIANT_CAMP_TILE_ID);
+				// pauseAndShowDialog(GIANT_DATA.initialContactDialog);
 
 				state.objectives.setVisible(GIANT_DATA.befriendObjId, true);
 				state.objectives.setVisible(GIANT_DATA.attackObjId, true);
@@ -1091,11 +1118,23 @@ function checkGiants() {
 					else
 						u.hitLife = u.maxLife * 0.25;
 				}
+				human.genericNotify("The giants have cursed your units!");
 			}
 			else {
 				giveResources(GIANT_DATA.destroyReward);
-				human.setTech(GIANT_DATA.destroyTechReward);
+				human.unlockedForFree(GIANT_DATA.destroyTechReward[0]);
+				human.unlockedForFree(GIANT_DATA.destroyTechReward[1]);
 				pauseAndShowDialog(DIALOG.giant_destroyed);
+				human.genericNotify("You have gained the techs 'Great Tower' and 'Warcraft'. Check the mods window for details.");
+
+				state.scriptDesc +=
+					"<p align='center'><font ='BigTitle'>Tech Received</font></p>"
+					+ "<p>"
+						+ "<b>* Great Tower:</b> Towers can be upgraded to level 3 for +50% damage and health<br /> "
+						+ "<b>* Warcraft:</b> You get lore and fame when gaining military XP"
+					+ "</p>"
+					+ "<br />"
+				;
 			}
 		}
 	}
@@ -1109,7 +1148,15 @@ function checkGiants() {
 			takeResources(GIANT_DATA.befriendResourcesRequired);
 			GIANT_DATA.befriended = true;
 			giveResources(GIANT_DATA.befriendReward);
-			human.setTech(GIANT_DATA.befriendTechReward);
+			human.unlockedForFree(GIANT_DATA.befriendTechReward[0]);
+			human.genericNotify("You have gained the tech 'City Builder'. Check the mods window for details.");
+			state.scriptDesc +=
+					"<p align='center'><font ='BigTitle'>Tech Received</font></p>"
+					+ "<p>"
+						+ "<b>* City Builder:</b> Upgrading tiles is 50% cheaper and upgrading provides a 10% production bonus"
+					+ "</p>"
+					+ "<br />"
+				;
 			human.freeFeast += GIANT_DATA.befriendFeastReward;
 			state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
 			state.objectives.setVisible(GIANT_DATA.attackObjId, false);
@@ -1135,7 +1182,7 @@ function checkObjectives() {
 		}
 	}
 
-	if(state.objectives.getStatus(FIND_GRAVEYARD_ID) != OStatus.Done && human.hasDiscovered(getZone(GRAVEYARD_ZONE_ID))){
+	else if(state.objectives.getStatus(FIND_GRAVEYARD_ID) != OStatus.Done && human.hasDiscovered(getZone(GRAVEYARD_ZONE_ID))){
 		if(canSendDialogThisUpdate()) {
 			msg("Found graveyard stone");
 			state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
@@ -1145,7 +1192,7 @@ function checkObjectives() {
 		}
 	}
 
-	if(!foundFirstStoneCirlce && (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1])))) {
+	else if(!foundFirstStoneCirlce && (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1])))) {
 		if(canSendDialogThisUpdate()) {
 			var foundZone = LORE_CIRCLE_ZONE_IDS[1];
 			if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
@@ -1158,7 +1205,7 @@ function checkObjectives() {
 		}
 	}
 
-	if(state.objectives.getStatus(FIND_STONE_CIRCLES_ID) == OStatus.Empty && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
+	else if(state.objectives.getStatus(FIND_STONE_CIRCLES_ID) == OStatus.Empty && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
 		if(canSendDialogThisUpdate()) {
 			msg("Found both circle sites");
 			pauseAndShowDialog(DIALOG.stone_circle_both_found);
@@ -1167,7 +1214,7 @@ function checkObjectives() {
 		}
 	}
 
-	if(!SHIP_DATA.portExplored && human.hasDiscovered(getZone(PORT_ZONE_ID))) {
+	else if(!SHIP_DATA.portExplored && human.hasDiscovered(getZone(PORT_ZONE_ID))) {
 		if(canSendDialogThisUpdate()) {
 			msg("Found the port site");
 			SHIP_DATA.portExplored = true;
@@ -1207,9 +1254,9 @@ function checkObjectives() {
 
 	checkWarchiefAlive();
 
-	if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
-		state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
-	}
+	// if(state.objectives.isVisible(DIALOG_SUPPRESS_ID) && state.time > DIALOG_SUPPRESSED_TIMEOUT) {
+	// 	state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	// }
 
 	// Defeat if the player loses too many tiles
 	if(state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId)) {
@@ -1278,9 +1325,9 @@ function findBuildingInZone(id:Int, type:BuildingKind) {
 	return null;
 }
 
-function createCameraToZone(id:Int, zoom:Float) {
+function createCameraToZone(id:Int, zoom = -1) {
 	var zone = getZone(id);
-	return {x:zone.x, y:zone.y, zoom:zoom};
+	return {x:zone.x, y:zone.y, zoom:zoom, zone:id};
 }
 
 function sendCameraToZone(id:Int) {
@@ -1413,7 +1460,7 @@ function manageBadEndingObjectives() {
  */
 function checkDialog() {
 	if(DIALOG.opening.length > 0 && TIME_TO_OPENING_DIALOG < state.time) {
-		var scene = createScene(DIALOG.opening, null);
+		var scene = createScene(DIALOG.opening, null, false);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Opening dialog shown");
 			DIALOG.opening = [];
@@ -1422,7 +1469,7 @@ function checkDialog() {
 	}
 
 	if(DIALOG.initial_explore.length > 0 && human.discovered.length == 3) {
-		var scene = createScene(DIALOG.initial_explore, null);
+		var scene = createScene(DIALOG.initial_explore, null, false);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Initial explore dialog shown");
 			state.objectives.setVisible(PRIMARY_OBJ_ID, true);
@@ -1431,7 +1478,7 @@ function checkDialog() {
 	}
 
 	if(DIALOG.spirit_appears.length > 0 && human.discovered.length == 5) {
-		var scene = createScene(DIALOG.spirit_appears, null);
+		var scene = createScene(DIALOG.spirit_appears, null, false);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirit Appears dialog shown");
 			DIALOG.spirit_appears = [];
@@ -1439,7 +1486,7 @@ function checkDialog() {
 	}
 
 	if(SPIRIT_DATA.firstTileTaken && LOST_ZONES.length >= 1) {
-		var scene = createScene(DIALOG.ghosts_take_first_tile, createCameraToZone(LOST_ZONES[0], -1));
+		var scene = createScene(DIALOG.ghosts_take_first_tile, createCameraToZone(LOST_ZONES[0], -1), false);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirits took first tile dialog shown");
 			// var zone = getZone(LOST_ZONES[0]);
@@ -1451,7 +1498,7 @@ function checkDialog() {
 	}
 
 	if(!state.objectives.isVisible(SPIRIT_DATA.tilesLostRemainingObjId) && LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold) {
-		var scene = createScene(DIALOG.ghosts_take_many_tiles, null);
+		var scene = createScene(DIALOG.ghosts_take_many_tiles, null, false);
 		if(pollSceneUntilPlayed(scene)) {
 			msg("Spirit defeat countdown triggered");
 			DIALOG.ghosts_take_many_tiles = [];
@@ -1601,12 +1648,16 @@ function launchPreparedAttacks() {
 			state.objectives.setVisible(attackObj.id, true);
 			var prep = getPreparedObjective(attack.objIndex);
 			state.objectives.setVisible(prep.id, false);
+
+			human.genericNotify("Spirits are attacking! Click me to see where", attack.zone);
+			human.addPingFlag(attack.zone.x, attack.zone.y, PingFlagType.Team);
 		}
 		else{
 			var prep = getPreparedObjective(attack.objIndex);
 
 			// The weird math below: normalizes the time to launch to be a percent between 0 and 100, which is much nicer and less confusing than a count-up to the exact time in seconds
-			state.objectives.setCurrentVal(prep.id, toInt(((attack.attackTime - attack.preparedTime) - (attack.attackTime - state.time) / (attack.attackTime - attack.preparedTime) * 100)));
+			msg("Attack Prog: " + toInt( (state.time - attack.preparedTime) / (attack.attackTime - attack.preparedTime)));
+			state.objectives.setCurrentVal(prep.id, toInt( (state.time - attack.preparedTime) / (attack.attackTime - attack.preparedTime)));
 		}
 	}
 }
@@ -1789,6 +1840,9 @@ function populateAttackData(zone:Zone, spiritCount:Int, attackTime:Float) {
 	state.objectives.setStatus(attack.id, OStatus.Empty);
 	var dir = determineCardinality(zone.id);
 
+	human.genericNotify("Spiritual energy is gathering! Click me to see where", zone);
+	human.addPingFlag(zone.x, zone.y, PingFlagType.InterestPoint);
+
 	SPIRIT_DATA.attackData.push({zone:zone, captureProgress:0.0, spiritCount:spiritCount, attackTime:attackTime, preparedTime:state.time, objIndex:index, attackedYet:false, dir:dir});
 }
 
@@ -1847,8 +1901,8 @@ function countUnitTypesOnTile(zoneIds:Array<Int>, unit:UnitKind):Int {
  * TODO: Should this only cover unnecessary dialog?
  */
 function disableDialogCallback() {
-	DIALOG_SUPPRESSED = true;
-	state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
+	// DIALOG_SUPPRESSED = true;
+	// state.objectives.setVisible(DIALOG_SUPPRESS_ID, false);
 }
 
 function shipUnitsCallback() {
@@ -1935,13 +1989,13 @@ function pauseAndShowDialog(dialog) {
 	}
 
 	dialogShownRecentlyLock = 5;
-	if(!DIALOG_SUPPRESSED) {
-		setPause(true);
-		for(d in dialog) {
-			talk(d.text, d.option);
-		}
-		setPause(false);
+	// if(!DIALOG_SUPPRESSED) {
+	setPause(true);
+	for(d in dialog) {
+		talk(d.text, d.option);
 	}
+	setPause(false);
+	// }
 }
 
 /**
@@ -2007,7 +2061,7 @@ function setupObjectives() {
 	state.objectives.add(BAD_ENDING_DATA.escapeObjId, BAD_ENDING_DATA.escapeObjName, {visible:false});
 
 	// TODO: should this be here?
-	state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
+	// state.objectives.add(DIALOG_SUPPRESS_ID, "Disable dialog", {visible:true}, {name:"Disable", action:"disableDialogCallback"}); // the editor doesn't understand buttons
 
 	// Misc objectivs, or actionable buttons for objectives
 	state.objectives.add(SHIP_DATA.objId, SHIP_DATA.objName, {visible:false}, {name:"Ship Units", action:SHIP_DATA.callback});
