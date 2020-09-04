@@ -21,12 +21,12 @@
  */
 var human:Player;
 
-var VERSION = "1.5";
+var VERSION = "1.6";
 
 DEBUG = {
 	SKIP_STUDYING: false,
 	MESSAGES: true,
-	SPIRITS_FAST: true,
+	SPIRITS_FAST: false,
 	BAD:false, // setup debug for bad ending
 	NEU:false, // setup debug for neutral ending
 	GOO:false, // setup debug for good ending
@@ -34,14 +34,14 @@ DEBUG = {
 
 	TIME_INDEX:0,
 
-	QUICK_BUTTON:false,
+	QUICK_BUTTON:true,
 	QUICK_BUTTON_INDEX:0,
 
 	QUICK_GIANTS:false,
 	QUICK_GIANTS_INDEX:0,
-	QUICK_GIANTS_BETRAY:false,
+	QUICK_GIANTS_BETRAY:true,
 
-	QUICK_KOBOLDS:false,
+	QUICK_KOBOLDS:true,
 	QUICK_KOBOLDS_INDEX:0,
 	QUICK_KOBOLDS_BETRAY:false,
 }
@@ -707,6 +707,7 @@ function onFirstLaunch() {
 			+ "today. Can you discover the secret of the island? Why was is abandoned, and who abandoned it? Could the Kobolds and the Giants "
 			+ "know anything? And why do you have the feeling that <i>something...doesn't want you here?</i>"
 		+ "</p>"
+		+ "<br />"
 	;
 
 	state.removeVictory(VictoryKind.VMoney);
@@ -934,12 +935,10 @@ function checkKobolds() {
 
 	if(!KOBOLD_DATA.initialContact) {
 		if(human.hasDiscovered(getZone(KOBOLD_DATA.tileForInitialContact))) {
-			if(canSendDialogThisUpdate()) {
+			var scene = createScene(KOBOLD_DATA.initialContactDialog, createCameraToZone(KOBOLD_HOME_TILE_ID, -1), true);
+			if(pollSceneUntilPlayed(scene)) {
 				msg("Initial kobold contact");
 				KOBOLD_DATA.initialContact = true;
-				human.discoverZone(getZone(KOBOLD_HOME_TILE_ID));
-				sendCameraToZone(KOBOLD_HOME_TILE_ID);
-				pauseAndShowDialog(KOBOLD_DATA.initialContactDialog);
 
 				state.objectives.setVisible(KOBOLD_DATA.bribeObjId, true);
 				state.objectives.setVisible(KOBOLD_DATA.attackObjId, true);
@@ -954,7 +953,8 @@ function checkKobolds() {
 			for(u in units) {
 				if(u.isMilitary && u.owner == human) {
 					KOBOLD_DATA.enemy = true;
-					pauseAndShowDialog(KOBOLD_DATA.firstAttackDialog);
+					var scene = createScene(KOBOLD_DATA.firstAttackDialog, null, false);
+					enqueueScene(scene);
 
 					// TODO: what should happen if the player betrays the kobolds?
 					if(KOBOLD_DATA.befriended) {
@@ -984,9 +984,12 @@ function checkKobolds() {
 			}
 			else {
 				giveResources(KOBOLD_DATA.destroyReward);
-				pauseAndShowDialog(KOBOLD_DATA.kobolds_destroyed);
+				var scene = createScene(KOBOLD_DATA.kobolds_destroyed, null, false);
+				enqueueScene(scene);
 
 				addFoes([{z:KOBOLD_HOME_TILE_ID, u:Unit.SpecterWarrior, nb:5}]);
+				addFoes([{z:LORE_CIRCLE_ZONE_IDS[0], u:Unit.SpecterWarrior, nb:5}]);
+				addFoes([{z:LORE_CIRCLE_ZONE_IDS[1], u:Unit.SpecterWarrior, nb:5}]);
 			}
 		}
 
@@ -1018,37 +1021,35 @@ function checkKobolds() {
 			msg("Does not have enough resources.");
 			KOBOLD_DATA.donateButtonPressed = false;
 		}
-		if(canSendDialogThisUpdate()) {
-			KOBOLD_DATA.donateButtonPressed = false;
+		KOBOLD_DATA.donateButtonPressed = false;
 
-			if(!KOBOLD_DATA.bribed) {
-				takeResources(KOBOLD_DATA.bribeResourcesRequired);
-				KOBOLD_DATA.bribed = true;
-				state.objectives.setVisible(KOBOLD_DATA.bribeObjId, false);
-				pauseAndShowDialog(KOBOLD_DATA.bribedDialog);
-				KOBOLD_DATA.timeOfBribe = state.time;
-				state.objectives.setVisible(KOBOLD_DATA.waitBribeDecisionObjId, true);
-			}
-			else {
-				takeResources(KOBOLD_DATA.befriendResourcesRequired);
-				KOBOLD_DATA.befriended = true;
-				state.objectives.setVisible(KOBOLD_DATA.befriendObjId, false);
-				pauseAndShowDialog(KOBOLD_DATA.bribedDialog);
-				giveResources(KOBOLD_DATA.befriendReward);
-				state.objectives.setVisible(KOBOLD_DATA.attackObjId, false);
+		if(!KOBOLD_DATA.bribed) {
+			takeResources(KOBOLD_DATA.bribeResourcesRequired);
+			KOBOLD_DATA.bribed = true;
+			state.objectives.setVisible(KOBOLD_DATA.bribeObjId, false);
+			var scene = createScene(KOBOLD_DATA.bribedDialog, null, false);
+			enqueueScene(scene);
+			KOBOLD_DATA.timeOfBribe = state.time;
+			state.objectives.setVisible(KOBOLD_DATA.waitBribeDecisionObjId, true);
+		}
+		else {
+			takeResources(KOBOLD_DATA.befriendResourcesRequired);
+			KOBOLD_DATA.befriended = true;
+			state.objectives.setVisible(KOBOLD_DATA.befriendObjId, false);
+			enqueueScene(createScene(KOBOLD_DATA.befriendedDialog, null, false));
+			giveResources(KOBOLD_DATA.befriendReward);
+			state.objectives.setVisible(KOBOLD_DATA.attackObjId, false);
 
-
-				// TODO remove kobolds from tiles
-			}
+			// TODO remove kobolds from lore stone circles
 		}
 	}
 
 	if(!KOBOLD_DATA.demandMade && KOBOLD_DATA.bribed && KOBOLD_DATA.timeOfBribe + KOBOLD_DATA.bribeDecisionDelay < state.time) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(KOBOLD_DATA.demandMoreShinyDialog, null, false);
+		if(pollSceneUntilPlayed(scene)) {
 			KOBOLD_DATA.demandMade = true;
 			state.objectives.setVisible(KOBOLD_DATA.befriendObjId, true);
 			registerObjectiveToFade(KOBOLD_DATA.waitBribeDecisionObjId);
-			pauseAndShowDialog(KOBOLD_DATA.demandMoreShinyDialog);
 		}
 	}
 }
@@ -1062,7 +1063,6 @@ function checkKobolds() {
 function checkGiants() {
 	if(!GIANT_DATA.initialContact) {
 		if(human.hasDiscovered(getZone(GIANT_DATA.tileForInitialContact))) {
-			msg("Enqueuing scene for finding giant");
 			var scene = createScene(GIANT_DATA.initialContactDialog, createCameraToZone(GIANT_CAMP_TILE_ID, -1), true);
 			if(pollSceneUntilPlayed(scene)) {
 				msg("Scene played, showing objectives");
@@ -1122,13 +1122,13 @@ function checkGiants() {
 			}
 			else {
 				giveResources(GIANT_DATA.destroyReward);
-				human.unlockedForFree(GIANT_DATA.destroyTechReward[0]);
-				human.unlockedForFree(GIANT_DATA.destroyTechReward[1]);
+				human.unlockTech(GIANT_DATA.destroyTechReward[0], true);
+				human.unlockTech(GIANT_DATA.destroyTechReward[1], true);
 				pauseAndShowDialog(DIALOG.giant_destroyed);
 				human.genericNotify("You have gained the techs 'Great Tower' and 'Warcraft'. Check the mods window for details.");
 
 				state.scriptDesc +=
-					"<p align='center'><font ='BigTitle'>Tech Received</font></p>"
+					"<p align='center'><font face='BigTitle'>Tech Received</font></p>"
 					+ "<p>"
 						+ "<b>* Great Tower:</b> Towers can be upgraded to level 3 for +50% damage and health<br /> "
 						+ "<b>* Warcraft:</b> You get lore and fame when gaining military XP"
@@ -1143,27 +1143,25 @@ function checkGiants() {
 			GIANT_DATA.donateButtonPressed = false;
 			msg("Not enough resources");
 		}
-		else if(canSendDialogThisUpdate()) {
-			GIANT_DATA.donateButtonPressed = false;
-			takeResources(GIANT_DATA.befriendResourcesRequired);
-			GIANT_DATA.befriended = true;
-			giveResources(GIANT_DATA.befriendReward);
-			human.unlockedForFree(GIANT_DATA.befriendTechReward[0]);
-			human.genericNotify("You have gained the tech 'City Builder'. Check the mods window for details.");
-			state.scriptDesc +=
-					"<p align='center'><font ='BigTitle'>Tech Received</font></p>"
-					+ "<p>"
-						+ "<b>* City Builder:</b> Upgrading tiles is 50% cheaper and upgrading provides a 10% production bonus"
-					+ "</p>"
-					+ "<br />"
-				;
-			human.freeFeast += GIANT_DATA.befriendFeastReward;
-			state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
-			state.objectives.setVisible(GIANT_DATA.attackObjId, false);
-			pauseAndShowDialog(GIANT_DATA.befriendedDialog);
-			registerObjectiveToFade(GIANT_DATA.befriendObjId);
-			registerObjectiveToFade(GIANT_DATA.attackObjId);
-		}
+		GIANT_DATA.donateButtonPressed = false;
+		takeResources(GIANT_DATA.befriendResourcesRequired);
+		GIANT_DATA.befriended = true;
+		giveResources(GIANT_DATA.befriendReward);
+		human.unlockTech(GIANT_DATA.befriendTechReward[0], true);
+		human.genericNotify("You have gained the tech 'City Builder'. Check the mods window for details.");
+		state.scriptDesc +=
+				"<p align='center'><font face='BigTitle'>Tech Received</font></p>"
+				+ "<p>"
+					+ "<b>* City Builder:</b> Upgrading tiles is 50% cheaper and upgrading provides a 10% production bonus"
+				+ "</p>"
+				+ "<br />"
+			;
+		human.freeFeast += GIANT_DATA.befriendFeastReward;
+		state.objectives.setStatus(GIANT_DATA.befriendObjId, OStatus.Done);
+		state.objectives.setVisible(GIANT_DATA.attackObjId, false);
+		enqueueScene(createScene(GIANT_DATA.befriendedDialog, null, false));
+		registerObjectiveToFade(GIANT_DATA.befriendObjId);
+		registerObjectiveToFade(GIANT_DATA.attackObjId);
 	}
 }
 
@@ -1173,53 +1171,48 @@ function checkGiants() {
 function checkObjectives() {
 
 	if(state.objectives.getStatus(FIND_STARTING_STONE_ID) != OStatus.Done && human.hasDiscovered(getZone(STARTER_CARVED_STONE_TILE_ID))){
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.found_lore_stone, createCameraToZone(STARTER_CARVED_STONE_TILE_ID, 1), false);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Found lore stone");
 			state.objectives.setStatus(FIND_STARTING_STONE_ID, OStatus.Done);
 			registerObjectiveToFade(FIND_STARTING_STONE_ID);
-			sendCameraToBuilding(findBuildingInZone(STARTER_CARVED_STONE_TILE_ID, Building.CarvedStone));
-			pauseAndShowDialog(DIALOG.found_lore_stone);
 		}
 	}
 
 	else if(state.objectives.getStatus(FIND_GRAVEYARD_ID) != OStatus.Done && human.hasDiscovered(getZone(GRAVEYARD_ZONE_ID))){
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.found_grave_yard, createCameraToZone(GRAVEYARD_ZONE_ID, 1), false);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Found graveyard stone");
 			state.objectives.setStatus(FIND_GRAVEYARD_ID, OStatus.Done);
 			registerObjectiveToFade(FIND_GRAVEYARD_ID);
-			sendCameraToZone(GRAVEYARD_ZONE_ID);
-			pauseAndShowDialog(DIALOG.found_grave_yard);
 		}
 	}
 
 	else if(!foundFirstStoneCirlce && (human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) || human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1])))) {
-		if(canSendDialogThisUpdate()) {
-			var foundZone = LORE_CIRCLE_ZONE_IDS[1];
-			if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
-				foundZone = LORE_CIRCLE_ZONE_IDS[0];
-
+		var foundZone = LORE_CIRCLE_ZONE_IDS[1];
+		if(human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])))
+			foundZone = LORE_CIRCLE_ZONE_IDS[0];
+		var scene = createScene(DIALOG.stone_circle_first_found, createCameraToZone(foundZone, 1), false);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Found first stone circle");
-			sendCameraToZone(foundZone);
-			pauseAndShowDialog(DIALOG.stone_circle_first_found);
 			foundFirstStoneCirlce = true;
 		}
 	}
 
 	else if(state.objectives.getStatus(FIND_STONE_CIRCLES_ID) == OStatus.Empty && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[0])) && human.hasDiscovered(getZone(LORE_CIRCLE_ZONE_IDS[1]))) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.stone_circle_both_found, null, false);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Found both circle sites");
-			pauseAndShowDialog(DIALOG.stone_circle_both_found);
 			state.objectives.setStatus(FIND_STONE_CIRCLES_ID, OStatus.Done);
 			registerObjectiveToFade(FIND_STONE_CIRCLES_ID);
 		}
 	}
 
 	else if(!SHIP_DATA.portExplored && human.hasDiscovered(getZone(PORT_ZONE_ID))) {
-		if(canSendDialogThisUpdate()) {
+		var scene = createScene(DIALOG.found_port_site, createCameraToZone(PORT_ZONE_ID, 1), false);
+		if(pollSceneUntilPlayed(scene)) {
 			msg("Found the port site");
 			SHIP_DATA.portExplored = true;
-			sendCameraToZone(PORT_ZONE_ID);
-			pauseAndShowDialog(DIALOG.found_port_site);
 			state.objectives.setStatus(FIND_PORT_SITE_ID, OStatus.Done);
 			registerObjectiveToFade(FIND_PORT_SITE_ID);
 		}
@@ -1245,7 +1238,7 @@ function checkObjectives() {
 		// A guard for the test button, as again the building can't exist in test mode
 		if(SHIP_DATA.portBuilding != null)
 			sendCameraToBuilding(SHIP_DATA.portBuilding);
-		pauseAndShowDialog(DIALOG.port_built);
+		enqueueScene(createScene(DIALOG.port_built, createCameraToZone(PORT_ZONE_ID, 1), false));
 
 		msg("Setting up ship data for mystery island.");
 		islandStudying.setupFinished = true;
@@ -1265,8 +1258,10 @@ function checkObjectives() {
 		if(LOST_ZONES.length >= SPIRIT_DATA.tooManyTilesTakenThreshold + SPIRIT_DATA.tilesLostRemaining) {
 			msg("Game lost to spirits claiming tiles");
 			state.objectives.setStatus(SPIRIT_DATA.tilesLostRemainingObjId, OStatus.Missed);
-			pauseAndShowDialog(DIALOG.ghosts_take_too_many_tiles);
-			customDefeat("The spirits have claimed the island.");
+			var scene = createScene(DIALOG.ghosts_take_too_many_tiles, null, false);
+			if(pollSceneUntilPlayed(scene)) {
+				customDefeat("The spirits have claimed the island.");
+			}
 		}
 	}
 
@@ -1964,22 +1959,12 @@ function calToSeconds(month:Int, year:Int) {
 	return month * 60 + year * 60 * 12;
 }
 
-function canSendDialogThisUpdate(): Bool {
-	// msg("Checking lock: " + dialogShownRecentlyLock);
-	if(dialogShownRecentlyLock > 0)
-		return false;
-	dialogShownRecentlyLock += 5;
-	return dialogShownRecentlyLock == 5;
-}
-
 /**
  * A helper function to show multiple lines of text.
  *
  * Will return false if dialog was not sent, otherwise true.
  */
 function pauseAndShowDialog(dialog) {
-
-	// msg("Lock amount before sending: " + dialogShownRecentlyLock);
 
 	// The checkStudying function may pass in empty dialog, which is fine,
 	// we just don't want to pause and unpause unnecessarily.
@@ -1988,7 +1973,6 @@ function pauseAndShowDialog(dialog) {
 		return;
 	}
 
-	dialogShownRecentlyLock = 5;
 	// if(!DIALOG_SUPPRESSED) {
 	setPause(true);
 	for(d in dialog) {
